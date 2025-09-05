@@ -1,0 +1,147 @@
+@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* Removed dark mode media query to force light mode always */
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Custom Components Layer */
+@layer components {
+  /* Card Components - Removed dark: variants */
+  .card {
+    @apply bg-white rounded-lg shadow-lg p-6;
+  }
+  
+  .card-sm {
+    @apply bg-white rounded-lg shadow-lg p-4;
+  }
+  
+  .metric-card {
+    @apply bg-gray-50 p-4 rounded-lg;
+  }
+  
+  .chart-container {
+    @apply bg-white rounded-lg p-6 shadow-lg;
+  }
+  
+  .chart-wrapper {
+    @apply h-96;
+  }
+  
+  .chart-wrapper-sm {
+    @apply h-64;
+  }
+
+  /* Form Components - Removed dark: variants */
+  .form-input {
+    @apply flex-1 h-20 px-4 py-2 border border-gray-300 rounded-full
+           focus:ring-2 focus:ring-blue-500 focus:border-transparent 
+           bg-white text-gray-900 
+           placeholder-gray-500 transition-colors;
+  }
+  
+  .btn-primary {
+    @apply px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 
+           text-white font-medium rounded-lg transition-colors 
+           focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+  }
+  
+  .form-label {
+    @apply block text-sm font-medium mb-2 text-gray-900;
+  }
+
+  /* Typography - Removed dark: variants */
+  .page-title {
+    @apply text-4xl font-bold mb-8 text-center text-black;
+  }
+  
+  .section-title {
+    @apply text-2xl font-bold mb-6 text-gray-900;
+  }
+  
+  .subsection-title {
+    @apply text-lg font-semibold mb-3 text-gray-900;
+  }
+
+  /* Metric Value Colors - Removed dark: variants */
+  .metric-positive {
+    @apply text-xl font-bold text-green-600;
+  }
+  
+  .metric-negative {
+    @apply text-xl font-bold text-red-600;
+  }
+  
+  .metric-neutral {
+    @apply text-xl font-bold text-gray-900;
+  }
+  
+  .metric-info {
+    @apply text-xl font-bold text-blue-600;
+  }
+  
+  .metric-label {
+    @apply text-sm text-gray-600;
+  }
+
+  /* Layout Grids */
+  .metrics-grid {
+    @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4;
+  }
+  
+  .charts-grid {
+    @apply grid grid-cols-1 lg:grid-cols-2 gap-8;
+  }
+  
+  .indicators-grid {
+    @apply grid grid-cols-1 lg:grid-cols-2 gap-6;
+  }
+
+  /* Loading Animation */
+  .loading-container {
+    @apply flex items-center justify-center py-12;
+  }
+  
+  .loading-content {
+    @apply flex items-center space-x-2;
+  }
+  
+  .loading-dot {
+    @apply w-4 h-4 bg-blue-600 rounded-full animate-bounce;
+  }
+  
+  .loading-text {
+    @apply ml-4 text-lg font-medium text-gray-900;
+  }
+
+  /* Container Layout */
+  .page-container {
+    @apply min-h-screen bg-white text-black p-6;
+  }
+  
+  .content-wrapper {
+    @apply max-w-7xl mx-auto;
+  }
+  
+  .content-section {
+    @apply space-y-8;
+  }
+}

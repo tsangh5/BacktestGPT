@@ -1,0 +1,67 @@
+{
+  "strategies": {
+    "SMA_Cross": {
+      "description": "Buy when short SMA crosses above long SMA, sell when opposite",
+      "indicators": [
+        { "id": "SMA_fast", "type": "SMA", "params": { "window": 20 } },
+        { "id": "SMA_slow", "type": "SMA", "params": { "window": 50 } }
+      ],
+      "entry": {
+        "op": "and",
+        "args": [
+          { "op": "gt", "args": ["SMA_fast.ma", "SMA_slow.ma"] },
+          { "op": "lt", "args": ["SMA_fast.ma.shift(1)", "SMA_slow.ma.shift(1)"] }
+        ]
+      },
+      "exit": {
+        "op": "lt",
+        "args": ["SMA_fast.ma", "SMA_slow.ma"]
+      }
+    },
+    "RSI_Oversold": {
+      "description": "Buy when RSI < 30, sell when RSI > 70",
+      "indicators": [
+        { "id": "RSI14", "type": "RSI", "params": { "window": 14 } }
+      ],
+      "entry": {
+        "op": "lt",
+        "args": ["RSI14.rsi", 30]
+      },
+      "exit": {
+        "op": "gt",
+        "args": ["RSI14.rsi", 70]
+      }
+    },
+    "MACD_Crossover": {
+      "description": "Buy when MACD crosses above signal, sell when crosses below",
+      "indicators": [
+        { "id": "MACD12_26_9", "type": "MACD", "params": { "fast_window": 12, "slow_window": 26, "signal_window": 9 } }
+      ],
+      "entry": {
+        "op": "and",
+        "args": [
+          { "op": "gt", "args": ["MACD12_26_9.macd", "MACD12_26_9.signal"] },
+          { "op": "lt", "args": ["MACD12_26_9.macd.shift(1)", "MACD12_26_9.signal.shift(1)"] }
+        ]
+      },
+      "exit": {
+        "op": "lt",
+        "args": ["MACD12_26_9.macd", "MACD12_26_9.signal"]
+      }
+    },
+    "Bollinger_Bounce": {
+      "description": "Buy when price touches lower band, sell when touches upper",
+      "indicators": [
+        { "id": "BB20", "type": "BollingerBands", "params": { "window": 20, "std_dev": 2 } }
+      ],
+      "entry": {
+        "op": "lt",
+        "args": ["Close", "BB20.lower"]
+      },
+      "exit": {
+        "op": "gt",
+        "args": ["Close", "BB20.upper"]
+      }
+    }
+  }
+}

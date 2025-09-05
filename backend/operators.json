@@ -1,0 +1,10 @@
+{
+  "operators": {
+    "logic": ["and", "or", "not"],
+    "comparison": ["lt", "lte", "gt", "gte", "eq", "neq"],
+    "math": ["add", "sub", "mul", "div", "neg", "abs", "max", "min"],
+    "time": ["shift", "rolling_mean", "rolling_max", "rolling_min"],
+    "cross": ["cross_above", "cross_below"],
+    "range": ["between", "outside"]
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "indicators": {
+    "SMA": {
+      "description": "Simple Moving Average",
+      "params": ["window"],
+      "outputs": ["ma"]
+    },
+    "EMA": {
+      "description": "Exponential Moving Average",
+      "params": ["window"],
+      "outputs": ["ema"]
+    },
+    "RSI": {
+      "description": "Relative Strength Index",
+      "params": ["window"],
+      "outputs": ["rsi"]
+    },
+    "MACD": {
+      "description": "Moving Average Convergence Divergence",
+      "params": ["fast_window", "slow_window", "signal_window"],
+      "outputs": ["macd", "signal", "hist"]
+    },
+    "BollingerBands": {
+      "description": "Bollinger Bands",
+      "params": ["window", "std_dev"],
+      "outputs": ["upper", "lower", "middle"]
+    },
+    "ATR": {
+      "description": "Average True Range",
+      "params": ["window"],
+      "outputs": ["atr"]
+    },
+    "Stochastic": {
+      "description": "Stochastic Oscillator",
+      "params": ["k_window", "d_window"],
+      "outputs": ["k", "d"]
+    },
+    "ADX": {
+      "description": "Average Directional Index",
+      "params": ["window"],
+      "outputs": ["adx", "plus_di", "minus_di"]
+    },
+    "VolumeSMA": {
+      "description": "Volume Simple Moving Average",
+      "params": ["window"],
+      "outputs": ["vol_sma"]
+    },
+    "VWAP": {
+      "description": "Volume Weighted Average Price",
+      "params": [],
+      "outputs": ["vwap"]
+    }
+  }
+}

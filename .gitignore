@@ -1,0 +1,11 @@
+node_modules
+package-lock.json
+package.json
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env/
+.venv/
+package-lock.json
+.DS_Store

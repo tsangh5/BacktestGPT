@@ -15,38 +15,53 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
-type ChartObj = { name: string; chart: any };
+// Types
+type ChartObj = { name: string; chart: { labels: string[]; datasets: any[] } };
 
+// Styles moved outside component (prevents recreation on every render)
+const styles = {
+  positive: 'metric-positive',
+  negative: 'metric-negative',
+  neutral: 'metric-neutral',
+  info: 'metric-info',
+};
+
+// Main Component
 export default function Home() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [nlInput, setNlInput] = useState('');
 
+  /** Handlers (memoized with useCallback) */
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setNlInput(e.target.value);
   }, []);
 
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setData(null);
-    try {
-      const res = await fetch('http://localhost:8000/natural_backtest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: nlInput }),
-      });
-      const json = await res.json();
-      setData(json);
-    } catch (error) {
-      console.error('Fetch error:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [nlInput]);
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      setLoading(true);
+      setData(null);
+      try {
+        const res = await fetch('http://localhost:8000/natural_backtest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: nlInput }),
+        });
+        const json = await res.json();
+        setData(json);
+      } catch (error) {
+        console.error('Fetch error:', error);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [nlInput]
+  );
 
+  /** Chart Data (memoized with useMemo) */
   const chartData = useMemo(() => {
-    return data && data.chart_data ? data.chart_data : {};
+    return data?.chart_data ?? {};
   }, [data]);
 
   const equityChart = useMemo(() => {
@@ -81,7 +96,7 @@ export default function Home() {
     };
   }, [chartData]);
 
-  const indicatorCharts = useMemo((): ChartObj[] => {
+  const indicatorCharts = useMemo<ChartObj[]>(() => {
     if (!chartData.indicators) return [];
     return Object.entries(chartData.indicators).map(([name, values]) => ({
       name,
@@ -90,7 +105,7 @@ export default function Home() {
         datasets: [
           {
             label: name,
-            data: values,
+            data: values as number[],
             borderColor: 'rgb(34, 197, 94)',
             backgroundColor: 'rgba(34, 197, 94, 0.1)',
             fill: false,
@@ -100,7 +115,7 @@ export default function Home() {
     }));
   }, [chartData]);
 
-  const signalCharts = useMemo((): ChartObj[] => {
+  const signalCharts = useMemo<ChartObj[]>(() => {
     if (!chartData.signals) return [];
     return Object.entries(chartData.signals).map(([name, values]) => ({
       name,
@@ -109,7 +124,7 @@ export default function Home() {
         datasets: [
           {
             label: name,
-            data: values,
+            data: values as number[],
             borderColor: 'rgb(249, 115, 22)',
             backgroundColor: 'rgba(249, 115, 22, 0.1)',
             fill: false,
@@ -119,41 +134,47 @@ export default function Home() {
     }));
   }, [chartData]);
 
-  const getMetricClassName = (value: number | undefined, type: 'return' | 'ratio' | 'factor' | 'neutral') => {
-    if (type === 'neutral') return 'metric-neutral';
-    if (value === undefined) return 'metric-neutral';
-    
-    switch (type) {
-      case 'return':
-        return value >= 0 ? 'metric-positive' : 'metric-negative';
-      case 'ratio':
-        return 'metric-info';
-      case 'factor':
-        return value >= 1 ? 'metric-positive' : 'metric-negative';
-      default:
-        return 'metric-neutral';
-    }
-  };
+  /** Metric Styling */
+  const getMetricClassName = useCallback(
+    (value: number | undefined, type: 'return' | 'ratio' | 'factor' | 'neutral') => {
+      if (type === 'neutral' || value === undefined) return styles.neutral;
+      switch (type) {
+        case 'return':
+          return value >= 0 ? styles.positive : styles.negative;
+        case 'ratio':
+          return styles.info;
+        case 'factor':
+          return value >= 1 ? styles.positive : styles.negative;
+        default:
+          return styles.neutral;
+      }
+    },
+    []
+  );
 
-  const metrics = [
-    { label: 'Starting Value', value: data?.metrics?.start_value, format: 'currency', type: 'neutral' as const },
-    { label: 'Ending Value', value: data?.metrics?.end_value, format: 'currency', type: 'neutral' as const },
-    { label: 'Total Return', value: data?.metrics?.total_return, format: 'percent', type: 'return' as const },
-    { label: 'CAGR', value: data?.metrics?.CAGR, format: 'percent', type: 'return' as const },
-    { label: 'Max Drawdown', value: data?.metrics?.max_drawdown, format: 'percent', type: 'neutral' as const, className: 'metric-negative' },
-    { label: 'Sharpe Ratio', value: data?.metrics?.sharpe_ratio, format: 'number', type: 'ratio' as const },
-    { label: 'Sortino Ratio', value: data?.metrics?.sortino_ratio, format: 'number', type: 'ratio' as const },
-    { label: 'Total Trades', value: data?.metrics?.total_trades, format: 'integer', type: 'neutral' as const },
-    { label: 'Win Rate', value: data?.metrics?.win_rate, format: 'percent', type: 'neutral' as const, className: 'metric-positive' },
-    { label: 'Avg Winning Trade', value: data?.metrics?.avg_winning_trade, format: 'percent', type: 'neutral' as const, className: 'metric-positive' },
-    { label: 'Avg Losing Trade', value: data?.metrics?.avg_losing_trade, format: 'percent', type: 'neutral' as const, className: 'metric-negative' },
-    { label: 'Profit Factor', value: data?.metrics?.profit_factor, format: 'number', type: 'factor' as const },
-    { label: 'Years', value: data?.metrics?.years, format: 'number', type: 'neutral' as const },
-  ];
+  /** Metrics (memoized list for stable rendering) */
+  const metrics = useMemo(
+    () => [
+      { label: 'Starting Value', value: data?.metrics?.start_value, format: 'currency', type: 'neutral' as const },
+      { label: 'Ending Value', value: data?.metrics?.end_value, format: 'currency', type: 'neutral' as const },
+      { label: 'Total Return', value: data?.metrics?.total_return, format: 'percent', type: 'return' as const },
+      { label: 'CAGR', value: data?.metrics?.CAGR, format: 'percent', type: 'return' as const },
+      { label: 'Max Drawdown', value: data?.metrics?.max_drawdown, format: 'percent', type: 'neutral' as const, className: styles.negative },
+      { label: 'Sharpe Ratio', value: data?.metrics?.sharpe_ratio, format: 'number', type: 'ratio' as const },
+      { label: 'Sortino Ratio', value: data?.metrics?.sortino_ratio, format: 'number', type: 'ratio' as const },
+      { label: 'Total Trades', value: data?.metrics?.total_trades, format: 'integer', type: 'neutral' as const },
+      { label: 'Win Rate', value: data?.metrics?.win_rate, format: 'percent', type: 'neutral' as const, className: styles.positive },
+      { label: 'Avg Winning Trade', value: data?.metrics?.avg_winning_trade, format: 'percent', type: 'neutral' as const, className: styles.positive },
+      { label: 'Avg Losing Trade', value: data?.metrics?.avg_losing_trade, format: 'percent', type: 'neutral' as const, className: styles.negative },
+      { label: 'Profit Factor', value: data?.metrics?.profit_factor, format: 'number', type: 'factor' as const },
+      { label: 'Years', value: data?.metrics?.years, format: 'number', type: 'neutral' as const },
+    ],
+    [data]
+  );
 
-  const formatValue = (value: number | undefined, format: string) => {
+  /** Value Formatter */
+  const formatValue = useCallback((value: number | undefined, format: string) => {
     if (value === undefined) return '0.00';
-    
     switch (format) {
       case 'currency':
         return `$${value.toFixed(2)}`;
@@ -161,17 +182,18 @@ export default function Home() {
         return `${value.toFixed(2)}%`;
       case 'integer':
         return value.toString();
-      case 'number':
       default:
         return value.toFixed(2);
     }
-  };
+  }, []);
 
+  /** Render */
   return (
     <div className="page-container">
       <div className="content-wrapper">
         <h1 className="page-title">Backtest Results</h1>
-        
+
+        {/* Input Form */}
         <form onSubmit={handleSubmit} className="card mb-8">
           <div className="mb-4">
             <label className="form-label">Strategy Description:</label>
@@ -190,17 +212,19 @@ export default function Home() {
           </div>
         </form>
 
+        {/* Loading State */}
         {loading && (
           <div className="loading-container">
             <div className="loading-content">
               <div className="loading-dot"></div>
-              <div className="loading-dot" style={{animationDelay: '0.1s'}}></div>
-              <div className="loading-dot" style={{animationDelay: '0.2s'}}></div>
+              <div className="loading-dot" style={{ animationDelay: '0.1s' }}></div>
+              <div className="loading-dot" style={{ animationDelay: '0.2s' }}></div>
               <span className="loading-text">Loading...</span>
             </div>
           </div>
         )}
 
+        {/* Results */}
         {!loading && data && (
           <div className="content-section">
             {/* Metrics Grid */}
@@ -223,14 +247,14 @@ export default function Home() {
               <div className="chart-container">
                 <h2 className="section-title">Equity Curve</h2>
                 <div className="chart-wrapper">
-                  {equityChart && <Line data={equityChart} options={{maintainAspectRatio: false}} />}
+                  {equityChart && <Line data={equityChart} options={{ maintainAspectRatio: false }} />}
                 </div>
               </div>
 
               <div className="chart-container">
                 <h2 className="section-title">Drawdown (%)</h2>
                 <div className="chart-wrapper">
-                  {drawdownChart && <Line data={drawdownChart} options={{maintainAspectRatio: false}} />}
+                  {drawdownChart && <Line data={drawdownChart} options={{ maintainAspectRatio: false }} />}
                 </div>
               </div>
             </div>
@@ -244,7 +268,7 @@ export default function Home() {
                     <div key={name} className="rounded-lg p-4">
                       <h3 className="subsection-title">{name}</h3>
                       <div className="chart-wrapper-sm">
-                        <Line data={chart} options={{maintainAspectRatio: false}} />
+                        <Line data={chart} options={{ maintainAspectRatio: false }} />
                       </div>
                     </div>
                   ))}
@@ -261,7 +285,7 @@ export default function Home() {
                     <div key={name} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                       <h3 className="subsection-title">{name}</h3>
                       <div className="chart-wrapper-sm">
-                        <Line data={chart} options={{maintainAspectRatio: false}} />
+                        <Line data={chart} options={{ maintainAspectRatio: false }} />
                       </div>
                     </div>
                   ))}

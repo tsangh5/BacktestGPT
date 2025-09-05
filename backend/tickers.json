@@ -1,0 +1,24 @@
+{
+    "tickers":{
+        "AAPL": {
+            "name": "Apple Inc.",
+            "sector": "Technology",
+            "industry": "Consumer Electronics"
+        },
+        "GOOGL": {
+            "name": "Alphabet Inc.",
+            "sector": "Communication Services",
+            "industry": "Internet Content & Information"
+        },
+        "AMZN": {
+            "name": "Amazon.com Inc.",
+            "sector": "Consumer Discretionary",
+            "industry": "Internet Retail"
+        },
+        "MSFT": {
+            "name": "Microsoft Corporation",
+            "sector": "Technology",
+            "industry": "Software - Infrastructure"
+        }
+    }
+}

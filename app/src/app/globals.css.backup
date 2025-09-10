@@ -1,0 +1,286 @@
+@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+/* Removed dark mode media query to force light mode always */
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Custom Components Layer */
+@layer components {
+  /* Card Components - Removed dark: variants */
+  .card {
+    @apply bg-white rounded-lg shadow-lg p-6;
+  }
+  
+  .card-sm {
+    @apply bg-white rounded-lg shadow-lg p-4;
+  }
+  
+  .metric-card {
+    @apply bg-gray-50 p-4 rounded-lg;
+  }
+  
+  .chart-container {
+    @apply bg-white rounded-lg p-6 shadow-lg;
+  }
+  
+  .chart-wrapper {
+    @apply h-96;
+  }
+  
+  .chart-wrapper-sm {
+    @apply h-64;
+  }
+
+  /* Form Components - Removed dark: variants */
+  .form-input {
+    @apply flex-1 px-4 py-2 border border-gray-300 rounded-lg
+           focus:ring-2 focus:ring-blue-500 focus:border-transparent 
+           bg-white text-gray-900 
+           placeholder-gray-500 transition-colors;
+  }
+  
+  .btn-primary {
+    @apply px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 
+           text-white font-medium rounded-lg transition-colors 
+           focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+  }
+  
+  .form-label {
+    @apply block text-sm font-medium mb-2 text-gray-900;
+  }
+
+  /* Typography - Removed dark: variants */
+  .page-title {
+    @apply text-4xl font-bold mb-8 text-center text-black;
+  }
+  
+  .section-title {
+    @apply text-2xl font-bold mb-6 text-gray-900;
+  }
+  
+  .subsection-title {
+    @apply text-lg font-semibold mb-3 text-gray-900;
+  }
+
+  /* Metric Value Colors - Removed dark: variants */
+  .metric-positive {
+    @apply text-xl font-bold text-green-600;
+  }
+  
+  .metric-negative {
+    @apply text-xl font-bold text-red-600;
+  }
+  
+  .metric-neutral {
+    @apply text-xl font-bold text-gray-900;
+  }
+  
+  .metric-info {
+    @apply text-xl font-bold text-blue-600;
+  }
+  
+  .metric-label {
+    @apply text-sm text-gray-600;
+  }
+
+/* Layout Grids with !important to override any conflicts */
+.metrics-grid {
+  display: grid !important;
+  grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+  gap: 1rem !important;
+  border: 2px solid blue !important; /* Temporary debug border */
+}
+
+@media (min-width: 768px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  .metrics-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  .metrics-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+.charts-grid {
+  display: grid !important;
+  grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+  gap: 2rem !important;
+}
+
+@media (min-width: 1024px) {
+  .charts-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+  
+  .indicators-grid {
+    display: grid;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+    gap: 1.5rem;
+  }
+  
+  @media (min-width: 1024px) {
+    .indicators-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  /* Loading Animation */
+  .loading-container {
+    @apply flex items-center justify-center py-12;
+  }
+  
+  .loading-content {
+    @apply flex items-center space-x-2;
+  }
+  
+  .loading-dot {
+    @apply w-4 h-4 bg-blue-600 rounded-full animate-bounce;
+  }
+  
+  .loading-text {
+    @apply ml-4 text-lg font-medium text-gray-900;
+  }
+
+  /* Container Layout */
+  .page-container {
+    @apply min-h-screen bg-white text-black p-6;
+  }
+  
+  .content-wrapper {
+    @apply max-w-7xl mx-auto;
+  }
+  
+  .content-section {
+    @apply space-y-8;
+  }
+
+  /* Error Display Components */
+  .error-container {
+    @apply bg-red-50 border border-red-200 rounded-lg p-6 mb-8;
+  }
+  
+  .error-content {
+    @apply space-y-4;
+  }
+  
+  .error-title {
+    @apply text-xl font-bold text-red-800 flex items-center gap-2;
+  }
+  
+  .error-message {
+    @apply text-red-700 leading-relaxed whitespace-pre-line;
+  }
+  
+  .error-help {
+    @apply text-red-600 text-sm italic;
+  }
+
+  /* Chat Interface Components */
+  .chat-container {
+    @apply bg-white rounded-lg shadow-lg mb-8 flex flex-col h-96;
+  }
+  
+  .chat-header {
+    @apply p-4 border-b border-gray-200 bg-gray-50 rounded-t-lg;
+  }
+  
+  .chat-title {
+    @apply text-lg font-semibold text-gray-900;
+  }
+  
+  .chat-messages {
+    @apply flex-1 p-4 space-y-4 overflow-y-auto;
+  }
+  
+  .message {
+    @apply flex;
+  }
+  
+  .message.user {
+    @apply justify-end;
+  }
+  
+  .message.assistant {
+    @apply justify-start;
+  }
+  
+  .message-content {
+    @apply max-w-xs lg:max-w-md px-4 py-2 rounded-lg;
+  }
+  
+  .message.user .message-content {
+    @apply bg-blue-500 text-white;
+  }
+  
+  .message.assistant .message-content {
+    @apply bg-gray-100 text-gray-900;
+  }
+  
+  .message-text {
+    @apply text-sm leading-relaxed;
+  }
+  
+  .message-time {
+    @apply text-xs opacity-70 mt-1;
+  }
+  
+  .typing-indicator {
+    @apply flex space-x-1;
+  }
+  
+  .typing-dot {
+    @apply w-2 h-2 bg-gray-400 rounded-full animate-bounce;
+  }
+  
+  .typing-dot:nth-child(2) {
+    @apply animation-delay-150;
+  }
+  
+  .typing-dot:nth-child(3) {
+    @apply animation-delay-300;
+  }
+  
+  .chat-input-form {
+    @apply p-4 border-t border-gray-200 flex gap-2;
+  }
+  
+  .chat-input {
+    @apply flex-1 px-3 py-2 border border-gray-300 rounded-lg 
+           focus:ring-2 focus:ring-blue-500 focus:border-transparent
+           disabled:bg-gray-100 disabled:cursor-not-allowed;
+  }
+  
+  .chat-send-btn {
+    @apply px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300
+           text-white font-medium rounded-lg transition-colors
+           disabled:cursor-not-allowed;
+  }
+}

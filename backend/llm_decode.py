@@ -57,7 +57,58 @@ def match_registry(item, registry):
     print(f"No match for '{item}'")
     return None, None
 
-def decode_natural_language(user_input):
+def generate_conversational_response(user_input, parsing_error_details="", conversation_history=None):
+    """
+    Use Gemini to generate a conversational response asking for missing information
+    or confirming strategy details before running the backtest.
+    """
+    client = genai.Client()
+    
+    # Build conversation context
+    context = ""
+    if conversation_history:
+        context = "Previous conversation:\n"
+        for msg in conversation_history[-3:]:  # Keep last 3 messages for context
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            context += f"{role.capitalize()}: {content}\n"
+        context += "\n"
+    
+    prompt = f"""
+    {context}You are a helpful trading strategy assistant. A user is trying to describe a trading strategy for backtesting.
+
+    Current user input: "{user_input}"
+    Technical parsing issue: {parsing_error_details}
+
+    Your task is to have a natural conversation to gather the missing information needed for backtesting. 
+
+    If information is missing, ask ONE specific follow-up question about the most critical missing piece:
+    1. If no ticker is clear: Ask which stock/asset they want to trade
+    2. If no indicators mentioned: Ask what technical indicators they want to use  
+    3. If entry conditions unclear: Ask when exactly they want to buy
+    4. If exit conditions unclear: Ask when exactly they want to sell
+
+    Keep responses conversational, friendly, and focused on getting ONE piece of missing info at a time.
+    Don't overwhelm with multiple questions or long explanations.
+
+    Examples of good responses:
+    - "Which stock would you like to backtest this strategy on? For example: AAPL, GOOGL, or SPY?"
+    - "What technical indicator should trigger the buy signal? Something like RSI, moving averages, or MACD?"
+    - "When exactly would you want to sell? For example, when RSI goes above 70, or after a certain profit/loss?"
+
+    Return ONLY your conversational response - no formatting, quotes, or JSON.
+    """
+    
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        return response.text.strip()
+    except Exception as e:
+        return "I'd be happy to help you set up a backtest! What stock would you like to analyze, and what trading signals are you interested in?"
+
+def decode_natural_language(user_input, conversation_history=None):
     def sanitize_for_json(obj):
         if isinstance(obj, float):
             if np.isnan(obj) or np.isinf(obj):
@@ -148,7 +199,8 @@ def decode_natural_language(user_input):
             print("Extracted entities (ast):", entities)
         except Exception as e2:
             print("AST extraction failed:", e2)
-            return {"error": "Failed to parse strategy from natural language"}
+            response_msg = generate_conversational_response(user_input, f"JSON/AST parsing failed: {str(e)}, {str(e2)}", conversation_history)
+            return {"conversation": True, "message": response_msg, "needs_clarification": True}
 
     # Fuzzy match ticker to registry
     ticker_key, ticker_val = (None, None)
@@ -198,7 +250,8 @@ def decode_natural_language(user_input):
 
     if not custom_indicators:
         print("No valid indicators found")
-        return {"error": "No valid indicators found in the strategy"}
+        response_msg = generate_conversational_response(user_input, "No valid technical indicators could be identified", conversation_history)
+        return {"conversation": True, "message": response_msg, "needs_clarification": True}
 
     # Extract entry/exit rules
     entry_rule = entities.get("strategy", {}).get("entry", {})
@@ -206,6 +259,17 @@ def decode_natural_language(user_input):
     
     print(f"[DEBUG] Entry rule extracted: {entry_rule}")
     print(f"[DEBUG] Exit rule extracted: {exit_rule}")
+
+    # Validate that we have meaningful entry/exit conditions
+    if not entry_rule or not entry_rule.get("op") or not entry_rule.get("args"):
+        print("Missing or invalid entry rule")
+        response_msg = generate_conversational_response(user_input, "No clear entry conditions specified", conversation_history)
+        return {"conversation": True, "message": response_msg, "needs_clarification": True}
+    
+    if not exit_rule or not exit_rule.get("op") or not exit_rule.get("args"):
+        print("Missing or invalid exit rule")
+        response_msg = generate_conversational_response(user_input, "No clear exit conditions specified", conversation_history)
+        return {"conversation": True, "message": response_msg, "needs_clarification": True}
 
     # Build final strategy config
     strategy_config = {

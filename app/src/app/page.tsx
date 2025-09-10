@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -16,6 +16,12 @@ import {
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
 // Types
+type ChatMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+};
+
 type ChartObj = { name: string; chart: { labels: string[]; datasets: any[] } };
 
 // Styles moved outside component (prevents recreation on every render)
@@ -30,33 +36,104 @@ const styles = {
 export default function Home() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [processingBacktest, setProcessingBacktest] = useState(false);
   const [nlInput, setNlInput] = useState('');
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
+    {
+      role: 'assistant',
+      content: 'Hi! I\'ll help you create and backtest a trading strategy. What would you like to backtest?',
+      timestamp: new Date()
+    }
+  ]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   /** Handlers (memoized with useCallback) */
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setNlInput(e.target.value);
   }, []);
 
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory, loading]);
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault();
+      if (!nlInput.trim()) return;
+      
+      // Add user message to chat
+      const userMessage: ChatMessage = {
+        role: 'user',
+        content: nlInput,
+        timestamp: new Date()
+      };
+      
+      setChatHistory(prev => [...prev, userMessage]);
       setLoading(true);
-      setData(null);
+      const currentInput = nlInput;
+      setNlInput(''); // Clear input immediately
+      
       try {
         const res = await fetch('http://localhost:8000/natural_backtest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: nlInput }),
+          body: JSON.stringify({ 
+            input: currentInput,
+            conversation_history: chatHistory.map(msg => ({
+              role: msg.role,
+              content: msg.content
+            }))
+          }),
         });
         const json = await res.json();
-        setData(json);
+        
+        if (json.conversation && json.needs_clarification) {
+          // Add assistant clarification message to chat
+          const assistantMessage: ChatMessage = {
+            role: 'assistant',
+            content: json.message,
+            timestamp: new Date()
+          };
+          setChatHistory(prev => [...prev, assistantMessage]);
+          setData(null); // Clear any previous results
+        } else if (json.error) {
+          // Handle other errors
+          const errorMessage: ChatMessage = {
+            role: 'assistant',
+            content: `I encountered an issue: ${json.error}`,
+            timestamp: new Date()
+          };
+          setChatHistory(prev => [...prev, errorMessage]);
+        } else {
+          // Success - show results and confirmation message
+          const successMessage: ChatMessage = {
+            role: 'assistant',
+            content: 'Great! I\'ve run your backtest. Here are the results:',
+            timestamp: new Date()
+          };
+          setChatHistory(prev => [...prev, successMessage]);
+          
+          // Show processing state while results are being prepared
+          setProcessingBacktest(true);
+          setTimeout(() => {
+            setData(json);
+            setProcessingBacktest(false);
+          }, 500); // Brief delay to show the blue dots
+        }
       } catch (error) {
         console.error('Fetch error:', error);
+        const errorMessage: ChatMessage = {
+          role: 'assistant',
+          content: 'Sorry, I encountered a connection error. Please try again.',
+          timestamp: new Date()
+        };
+        setChatHistory(prev => [...prev, errorMessage]);
       } finally {
         setLoading(false);
       }
     },
-    [nlInput]
+    [nlInput, chatHistory]
   );
 
   /** Chart Data (memoized with useMemo) */
@@ -189,52 +266,272 @@ export default function Home() {
 
   /** Render */
   return (
-    <div className="page-container">
-      <div className="content-wrapper">
-        <h1 className="page-title">Backtest Results</h1>
+    <div className="page-container" style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
+      <div className="content-wrapper" style={{ padding: '0 1rem' }}>
+        <h1 className="page-title" style={{ marginBottom: '2rem' }}>BacktestGPT</h1>
 
-        {/* Input Form */}
-        <form onSubmit={handleSubmit} className="card mb-8">
-          <div className="mb-4">
-            <label className="form-label">Strategy Description:</label>
-            <div className="flex gap-4 items-center">
-              <input
-                type="text"
-                value={nlInput}
-                onChange={handleInputChange}
-                className="form-input"
-                placeholder="e.g. Buy when RSI < 30, sell when RSI > 70 for SPY"
-              />
-              <button type="submit" disabled={loading} className="btn-primary">
-                {loading ? 'Running...' : 'Run Backtest'}
-              </button>
-            </div>
+        {/* Chat Interface */}
+        <div 
+          className="chat-container"
+          style={{ 
+            backgroundColor: 'white', 
+            borderRadius: '0.75rem', 
+            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)', 
+            marginBottom: '3rem', 
+            margin: '0 0 3rem 0',
+            display: 'flex', 
+            flexDirection: 'column', 
+            height: '24rem' 
+          }}
+        >
+          <div 
+            className="chat-header"
+            style={{ 
+              padding: '1rem', 
+              borderBottom: '1px solid #e5e7eb', 
+              backgroundColor: '#f9fafb', 
+              borderTopLeftRadius: '0.5rem', 
+              borderTopRightRadius: '0.5rem' 
+            }}
+          >
+            <h2 
+              className="chat-title"
+              style={{ 
+                fontSize: '1.125rem', 
+                fontWeight: '600', 
+                color: '#111827', 
+                margin: 0 
+              }}
+            >
+              Strategy Assistant
+            </h2>
           </div>
-        </form>
+          
+          <div 
+            className="chat-messages"
+            style={{ 
+              flex: '1', 
+              padding: '1rem', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: '1rem', 
+              overflowY: 'auto' 
+            }}
+          >
+            {chatHistory.map((message, index) => (
+              <div 
+                key={index} 
+                className={`message ${message.role}`}
+                style={{ 
+                  display: 'flex', 
+                  justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start' 
+                }}
+              >
+                <div 
+                  className="message-content"
+                  style={{ 
+                    maxWidth: message.role === 'user' ? '16rem' : '24rem', 
+                    padding: '0.5rem 1rem', 
+                    borderRadius: '0.5rem',
+                    backgroundColor: message.role === 'user' ? '#3b82f6' : '#f3f4f6',
+                    color: message.role === 'user' ? 'white' : '#111827'
+                  }}
+                >
+                  <div 
+                    className="message-text"
+                    style={{ 
+                      fontSize: '0.875rem', 
+                      lineHeight: '1.5' 
+                    }}
+                  >
+                    {message.content}
+                  </div>
+                </div>
+              </div>
+            ))}
+            
+            {loading && (
+              <div 
+                className="message assistant"
+                style={{ 
+                  display: 'flex', 
+                  justifyContent: 'flex-start' 
+                }}
+              >
+                <div 
+                  className="message-content"
+                  style={{ 
+                    maxWidth: '24rem', 
+                    padding: '0.5rem 1rem', 
+                    borderRadius: '0.5rem',
+                    backgroundColor: '#f3f4f6',
+                    color: '#111827'
+                  }}
+                >
+                  <div 
+                    className="typing-indicator"
+                    style={{ 
+                      display: 'flex', 
+                      gap: '0.25rem' 
+                    }}
+                  >
+                    <div 
+                      className="typing-dot"
+                      style={{ 
+                        width: '0.5rem', 
+                        height: '0.5rem', 
+                        backgroundColor: '#9ca3af', 
+                        borderRadius: '50%',
+                        animation: 'bounce 1.4s ease-in-out infinite both'
+                      }}
+                    ></div>
+                    <div 
+                      className="typing-dot"
+                      style={{ 
+                        width: '0.5rem', 
+                        height: '0.5rem', 
+                        backgroundColor: '#9ca3af', 
+                        borderRadius: '50%',
+                        animation: 'bounce 1.4s ease-in-out infinite both',
+                        animationDelay: '0.16s'
+                      }}
+                    ></div>
+                    <div 
+                      className="typing-dot"
+                      style={{ 
+                        width: '0.5rem', 
+                        height: '0.5rem', 
+                        backgroundColor: '#9ca3af', 
+                        borderRadius: '50%',
+                        animation: 'bounce 1.4s ease-in-out infinite both',
+                        animationDelay: '0.32s'
+                      }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+          
+          <form 
+            onSubmit={handleSubmit} 
+            className="chat-input-form"
+            style={{ 
+              padding: '1rem', 
+              borderTop: '1px solid #e5e7eb', 
+              display: 'flex', 
+              gap: '0.5rem' 
+            }}
+          >
+            <input
+              type="text"
+              value={nlInput}
+              onChange={handleInputChange}
+              className="chat-input"
+              style={{ 
+                flex: '1', 
+                padding: '0.5rem 0.75rem', 
+                border: '1px solid #d1d5db', 
+                borderRadius: '0.5rem', 
+                fontSize: '0.875rem',
+                outline: 'none'
+              }}
+              placeholder="Describe your trading strategy..."
+              disabled={loading}
+            />
+            <button 
+              type="submit" 
+              disabled={loading || !nlInput.trim()} 
+              className="chat-send-btn"
+              style={{ 
+                padding: '0.5rem 1rem', 
+                backgroundColor: loading || !nlInput.trim() ? '#d1d5db' : '#3b82f6',
+                color: 'white', 
+                fontWeight: '500', 
+                borderRadius: '0.5rem', 
+                border: 'none', 
+                cursor: loading || !nlInput.trim() ? 'not-allowed' : 'pointer',
+                transition: 'background-color 0.2s'
+              }}
+            >
+              {loading ? 'Running...' : 'Send'}
+            </button>
+          </form>
+        </div>
 
-        {/* Loading State */}
-        {loading && (
+        {/* Backtest Processing State */}
+        {processingBacktest && (
           <div className="loading-container">
             <div className="loading-content">
               <div className="loading-dot"></div>
               <div className="loading-dot" style={{ animationDelay: '0.1s' }}></div>
               <div className="loading-dot" style={{ animationDelay: '0.2s' }}></div>
-              <span className="loading-text">Loading...</span>
             </div>
           </div>
         )}
 
         {/* Results */}
-        {!loading && data && (
-          <div className="content-section">
+        {!loading && !processingBacktest && data && (
+          <div 
+            className="content-section"
+            style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}
+          >
             {/* Metrics Grid */}
-            <div className="card">
-              <h2 className="section-title">Performance Metrics</h2>
-              <div className="metrics-grid">
+            <div 
+              className="card"
+              style={{ 
+                backgroundColor: 'white', 
+                borderRadius: '0.75rem', 
+                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)', 
+                padding: '2rem',
+                margin: '1rem 0'
+              }}
+            >
+              <h2 
+                className="section-title"
+                style={{ 
+                  fontSize: '1.5rem', 
+                  fontWeight: '700', 
+                  marginBottom: '1.5rem', 
+                  color: '#111827' 
+                }}
+              >
+                Performance Metrics
+              </h2>
+              <div 
+                className="metrics-responsive"
+              >
                 {metrics.map(({ label, value, format, type, className }) => (
-                  <div key={label} className="metric-card">
-                    <div className="metric-label">{label}</div>
-                    <div className={className || getMetricClassName(value, type)}>
+                  <div 
+                    key={label} 
+                    className="metric-card"
+                    style={{ 
+                      backgroundColor: '#f9fafb', 
+                      padding: '1rem', 
+                      borderRadius: '0.5rem' 
+                    }}
+                  >
+                    <div 
+                      className="metric-label"
+                      style={{ 
+                        fontSize: '0.875rem', 
+                        color: '#4b5563',
+                        marginBottom: '0.5rem'
+                      }}
+                    >
+                      {label}
+                    </div>
+                    <div 
+                      className={className || getMetricClassName(value, type)}
+                      style={{ 
+                        fontSize: '1.25rem', 
+                        fontWeight: '700',
+                        color: className?.includes('positive') ? '#059669' : 
+                              className?.includes('negative') ? '#dc2626' :
+                              className?.includes('info') ? '#2563eb' : '#111827'
+                      }}
+                    >
                       {formatValue(value, format)}
                     </div>
                   </div>
@@ -243,17 +540,68 @@ export default function Home() {
             </div>
 
             {/* Charts */}
-            <div className="charts-grid">
-              <div className="chart-container">
-                <h2 className="section-title">Equity Curve</h2>
-                <div className="chart-wrapper">
+            <div 
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(1, minmax(0, 1fr))',
+                gap: '2rem'
+              }}
+              className="charts-responsive"
+            >
+              <div 
+                className="chart-container"
+                style={{ 
+                  backgroundColor: 'white', 
+                  borderRadius: '0.75rem', 
+                  padding: '2rem', 
+                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                  margin: '1rem 0'
+                }}
+              >
+                <h2 
+                  className="section-title"
+                  style={{ 
+                    fontSize: '1.5rem', 
+                    fontWeight: '700', 
+                    marginBottom: '1.5rem', 
+                    color: '#111827' 
+                  }}
+                >
+                  Equity Curve
+                </h2>
+                <div 
+                  className="chart-wrapper"
+                  style={{ height: '18rem' }}
+                >
                   {equityChart && <Line data={equityChart} options={{ maintainAspectRatio: false }} />}
                 </div>
               </div>
 
-              <div className="chart-container">
-                <h2 className="section-title">Drawdown (%)</h2>
-                <div className="chart-wrapper">
+              <div 
+                className="chart-container"
+                style={{ 
+                  backgroundColor: 'white', 
+                  borderRadius: '0.75rem', 
+                  padding: '2rem', 
+                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                  margin: '1rem 0'
+                }}
+              >
+                <h2 
+                  className="section-title"
+                  style={{ 
+                    fontSize: '1.5rem', 
+                    fontWeight: '700', 
+                    marginBottom: '1.5rem', 
+                    color: '#111827' 
+                  }}
+                >
+                  Drawdown (%)
+                </h2>
+                <div 
+                  className="chart-wrapper"
+                  style={{ height: '18rem' }}
+                >
                   {drawdownChart && <Line data={drawdownChart} options={{ maintainAspectRatio: false }} />}
                 </div>
               </div>
@@ -261,13 +609,53 @@ export default function Home() {
 
             {/* Indicators */}
             {indicatorCharts.length > 0 && (
-              <div className="card">
-                <h2 className="section-title">Indicators</h2>
-                <div className="indicators-grid">
+              <div 
+                className="card"
+                style={{ 
+                  backgroundColor: 'white', 
+                  borderRadius: '0.5rem', 
+                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)', 
+                  padding: '1.5rem' 
+                }}
+              >
+                <h2 
+                  className="section-title"
+                  style={{ 
+                    fontSize: '1.5rem', 
+                    fontWeight: '700', 
+                    marginBottom: '1.5rem', 
+                    color: '#111827' 
+                  }}
+                >
+                  Indicators
+                </h2>
+                <div 
+                  className="indicators-grid"
+                >
                   {indicatorCharts.map(({ name, chart }) => (
-                    <div key={name} className="rounded-lg p-4">
-                      <h3 className="subsection-title">{name}</h3>
-                      <div className="chart-wrapper-sm">
+                    <div 
+                      key={name} 
+                      className="rounded-lg p-4"
+                      style={{ 
+                        borderRadius: '0.5rem', 
+                        padding: '1rem' 
+                      }}
+                    >
+                      <h3 
+                        className="subsection-title"
+                        style={{ 
+                          fontSize: '1.125rem', 
+                          fontWeight: '600', 
+                          marginBottom: '0.75rem', 
+                          color: '#111827' 
+                        }}
+                      >
+                        {name}
+                      </h3>
+                      <div 
+                        className="chart-wrapper-sm"
+                        style={{ height: '16rem' }}
+                      >
                         <Line data={chart} options={{ maintainAspectRatio: false }} />
                       </div>
                     </div>
@@ -278,13 +666,54 @@ export default function Home() {
 
             {/* Signals */}
             {signalCharts.length > 0 && (
-              <div className="card">
-                <h2 className="section-title">Signals</h2>
-                <div className="indicators-grid">
+              <div 
+                className="card"
+                style={{ 
+                  backgroundColor: 'white', 
+                  borderRadius: '0.5rem', 
+                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)', 
+                  padding: '1.5rem' 
+                }}
+              >
+                <h2 
+                  className="section-title"
+                  style={{ 
+                    fontSize: '1.5rem', 
+                    fontWeight: '700', 
+                    marginBottom: '1.5rem', 
+                    color: '#111827' 
+                  }}
+                >
+                  Signals
+                </h2>
+                <div 
+                  className="indicators-grid"
+                >
                   {signalCharts.map(({ name, chart }) => (
-                    <div key={name} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                      <h3 className="subsection-title">{name}</h3>
-                      <div className="chart-wrapper-sm">
+                    <div 
+                      key={name} 
+                      className="border border-gray-200 dark:border-gray-700 rounded-lg p-4"
+                      style={{ 
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '0.5rem', 
+                        padding: '1rem' 
+                      }}
+                    >
+                      <h3 
+                        className="subsection-title"
+                        style={{ 
+                          fontSize: '1.125rem', 
+                          fontWeight: '600', 
+                          marginBottom: '0.75rem', 
+                          color: '#111827' 
+                        }}
+                      >
+                        {name}
+                      </h3>
+                      <div 
+                        className="chart-wrapper-sm"
+                        style={{ height: '16rem' }}
+                      >
                         <Line data={chart} options={{ maintainAspectRatio: false }} />
                       </div>
                     </div>

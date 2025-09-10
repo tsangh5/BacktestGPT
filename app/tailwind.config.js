@@ -4,6 +4,7 @@ module.exports = {
     './pages/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
     './app/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
     extend: {
@@ -13,8 +14,8 @@ module.exports = {
         border: 'hsl(var(--border))',
       },
       fontFamily: {
-        sans: ['var(--font-geist-sans)', 'Arial', 'Helvetica', 'sans-serif'],
-        mono: ['var(--font-geist-mono)', 'Monaco', 'Consolas', 'monospace'],
+        sans: ['var(--font-inter)', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        mono: ['var(--font-jetbrains-mono)', 'JetBrains Mono', 'Monaco', 'Consolas', 'monospace'],
       },
       animation: {
         'bounce-slow': 'bounce 2s infinite',

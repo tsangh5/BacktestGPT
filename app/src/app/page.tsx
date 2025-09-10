@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -268,7 +269,16 @@ export default function Home() {
   return (
     <div className="page-container" style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
       <div className="content-wrapper" style={{ padding: '0 1rem' }}>
-        <h1 className="page-title" style={{ marginBottom: '2rem' }}>BacktestGPT</h1>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '2rem', gap: '1rem' }}>
+          <Image 
+            src="/logo.svg" 
+            alt="BacktestGPT Logo" 
+            width={48} 
+            height={48}
+            style={{ flexShrink: 0 }}
+          />
+          <h1 className="page-title" style={{ margin: '0', fontSize: '2.5rem', fontWeight: 'bold' }}>BacktestGPT</h1>
+        </div>
 
         {/* Chat Interface */}
         <div 

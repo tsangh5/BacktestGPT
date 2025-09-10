@@ -1,147 +1,129 @@
 @import "tailwindcss";
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Page container spacing */
+.page-container {
+  padding: 2rem;
+  margin: 0 auto;
+  max-width: 1400px;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* Content wrapper spacing */
+.content-wrapper {
+  padding: 0 1rem;
 }
 
-/* Removed dark mode media query to force light mode always */
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Simple responsive charts grid with better spacing */
+.charts-responsive {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 2rem;
+  margin: 2rem 0;
 }
 
-/* Custom Components Layer */
-@layer components {
-  /* Card Components - Removed dark: variants */
-  .card {
-    @apply bg-white rounded-lg shadow-lg p-6;
+@media (min-width: 1024px) {
+  .charts-responsive {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 2rem;
   }
-  
-  .card-sm {
-    @apply bg-white rounded-lg shadow-lg p-4;
-  }
-  
-  .metric-card {
-    @apply bg-gray-50 p-4 rounded-lg;
-  }
-  
-  .chart-container {
-    @apply bg-white rounded-lg p-6 shadow-lg;
-  }
-  
-  .chart-wrapper {
-    @apply h-96;
-  }
-  
-  .chart-wrapper-sm {
-    @apply h-64;
-  }
+}
 
-  /* Form Components - Removed dark: variants */
-  .form-input {
-    @apply flex-1 h-20 px-4 py-2 border border-gray-300 rounded-full
-           focus:ring-2 focus:ring-blue-500 focus:border-transparent 
-           bg-white text-gray-900 
-           placeholder-gray-500 transition-colors;
-  }
-  
-  .btn-primary {
-    @apply px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 
-           text-white font-medium rounded-lg transition-colors 
-           focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
-  }
-  
-  .form-label {
-    @apply block text-sm font-medium mb-2 text-gray-900;
-  }
-
-  /* Typography - Removed dark: variants */
-  .page-title {
+.page-title {
     @apply text-4xl font-bold mb-8 text-center text-black;
-  }
-  
-  .section-title {
-    @apply text-2xl font-bold mb-6 text-gray-900;
-  }
-  
-  .subsection-title {
-    @apply text-lg font-semibold mb-3 text-gray-900;
-  }
+}
 
-  /* Metric Value Colors - Removed dark: variants */
-  .metric-positive {
-    @apply text-xl font-bold text-green-600;
-  }
-  
-  .metric-negative {
-    @apply text-xl font-bold text-red-600;
-  }
-  
-  .metric-neutral {
-    @apply text-xl font-bold text-gray-900;
-  }
-  
-  .metric-info {
-    @apply text-xl font-bold text-blue-600;
-  }
-  
-  .metric-label {
-    @apply text-sm text-gray-600;
-  }
+/* Chart containers with more spacing */
+.chart-container {
+  margin: 1rem 0;
+}
 
-  /* Layout Grids */
-  .metrics-grid {
-    @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4;
+/* Simple responsive metrics grid */
+.metrics-responsive {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+@media (min-width: 768px) {
+  .metrics-responsive {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2rem;
   }
-  
-  .charts-grid {
-    @apply grid grid-cols-1 lg:grid-cols-2 gap-8;
+}
+
+@media (min-width: 1024px) {
+  .metrics-responsive {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2rem;
   }
-  
+}
+
+@media (min-width: 1280px) {
+  .metrics-responsive {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 2rem;
+  }
+}
+
+/* Responsive indicators grid - 2 columns on desktop with better spacing */
+.indicators-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+@media (min-width: 1024px) {
   .indicators-grid {
-    @apply grid grid-cols-1 lg:grid-cols-2 gap-6;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 2rem;
   }
+}
 
-  /* Loading Animation */
-  .loading-container {
-    @apply flex items-center justify-center py-12;
-  }
-  
-  .loading-content {
-    @apply flex items-center space-x-2;
-  }
-  
-  .loading-dot {
-    @apply w-4 h-4 bg-blue-600 rounded-full animate-bounce;
-  }
-  
-  .loading-text {
-    @apply ml-4 text-lg font-medium text-gray-900;
-  }
+/* Card styling */
+.card {
+  margin: 1rem 0;
+  border-radius: 0.75rem;
+}
 
-  /* Container Layout */
-  .page-container {
-    @apply min-h-screen bg-white text-black p-6;
+/* Metric cards with better spacing */
+.metric-card {
+  padding: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+/* Animated typing dots */
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0);
   }
-  
-  .content-wrapper {
-    @apply max-w-7xl mx-auto;
+  40% {
+    transform: scale(1);
   }
-  
-  .content-section {
-    @apply space-y-8;
-  }
+}
+
+.typing-dot {
+  animation: bounce 1.4s ease-in-out infinite both;
+}
+
+/* Loading container styles */
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem;
+}
+
+.loading-content {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.loading-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  background-color: #3b82f6;
+  border-radius: 50%;
+  animation: bounce 1.4s ease-in-out infinite both;
 }

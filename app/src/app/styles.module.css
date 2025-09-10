@@ -1,0 +1,23 @@
+.positive {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: rgb(34, 197, 94);
+}
+
+.negative {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: rgb(239, 68, 68);
+}
+
+.neutral {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: rgb(17, 24, 39);
+}
+
+.info {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: rgb(59, 130, 246);
+}

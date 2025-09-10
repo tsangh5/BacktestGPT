@@ -34,6 +34,7 @@ class BacktestRequest(BaseModel):
 # New model for natural language input
 class NaturalBacktestRequest(BaseModel):
     input: str
+    conversation_history: Optional[list] = []
 
 @app.post("/backtest")
 async def backtest_endpoint(request: BacktestRequest):
@@ -88,19 +89,20 @@ async def natural_backtest_endpoint(request: NaturalBacktestRequest):
     import traceback
     print(f"[natural_backtest] Received text input: {request.input}")
     try:
-        result = decode_natural_language(request.input)
+        result = decode_natural_language(request.input, request.conversation_history)
         if result is None:
             print("[natural_backtest] Error: decode_natural_language returned None")
             raise HTTPException(status_code=500, detail="Internal error: No result returned.")
+        
+        # If there's an error in the result, return it as part of the response (not as HTTP error)
+        # This allows the frontend to display the helpful error message
         if result.get("error"):
-            print(f"[natural_backtest] Error: {result['error']}")
-            raise HTTPException(status_code=400)
+            print(f"[natural_backtest] Parsing error: {result['error']}")
+            return result  # Return the error as part of the JSON response
+        
         print(f"[natural_backtest] Success. Returning result.")
         return result
-    except HTTPException as http_exc:
-        print(f"[natural_backtest] HTTPException: {http_exc.detail}")
-        raise
     except Exception as e:
         print(f"[natural_backtest] Unexpected error: {str(e)}")
-        # traceback.print_exc()
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")

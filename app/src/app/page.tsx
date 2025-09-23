@@ -13,6 +13,7 @@ import {
   Tooltip,
   Legend,
 } from 'chart.js';
+import type { ChartDataset } from 'chart.js';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
@@ -23,8 +24,46 @@ type ChatMessage = {
   timestamp: Date;
 };
 
-type ChartObj = { name: string; chart: { labels: string[]; datasets: any[] } };
+type ChartDataObj = {
+  dates: string[];
+  equity: number[];
+  drawdown: number[];
+  indicators?: Record<string, number[]>;
+  signals?: Record<string, number[]>;
+};
 
+type Metrics = {
+  start_value?: number;
+  end_value?: number;
+  total_return?: number;
+  CAGR?: number;
+  max_drawdown?: number;
+  sharpe_ratio?: number;
+  sortino_ratio?: number;
+  total_trades?: number;
+  win_rate?: number;
+  avg_winning_trade?: number;
+  avg_losing_trade?: number;
+  profit_factor?: number;
+  years?: number;
+};
+
+type DataType = {
+  chart_data: ChartDataObj;
+  metrics: Metrics;
+  conversation?: any;  // keep any here if structure is unknown
+  needs_clarification?: boolean;
+  message?: string;
+  error?: string;
+};
+
+type ChartObj = { 
+  name: string; 
+  chart: { 
+    labels: string[]; 
+    datasets: ChartDataset<'line'>[]; 
+  }; 
+};
 // Styles moved outside component (prevents recreation on every render)
 const styles = {
   positive: 'metric-positive',
@@ -35,7 +74,7 @@ const styles = {
 
 // Main Component
 export default function Home() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<DataType | null>(null);
   const [loading, setLoading] = useState(false);
   const [processingBacktest, setProcessingBacktest] = useState(false);
   const [nlInput, setNlInput] = useState('');

@@ -48,10 +48,22 @@ type Metrics = {
   years?: number;
 };
 
+type ConversationMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: string | Date;
+};
+
+type ConversationData = {
+  messages: ConversationMessage[];
+  session_id?: string;
+  metadata?: Record<string, unknown>;
+};
+
 type DataType = {
   chart_data: ChartDataObj;
   metrics: Metrics;
-  conversation?: any;  // keep any here if structure is unknown
+  conversation?: unknown;  // keep any here if structure is unknown
   needs_clarification?: boolean;
   message?: string;
   error?: string;
@@ -63,6 +75,60 @@ type ChartObj = {
     labels: string[]; 
     datasets: ChartDataset<'line'>[]; 
   }; 
+};
+// Add these type guard functions
+const isConversationMessage = (obj: unknown): obj is ConversationMessage => {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    'role' in obj &&
+    'content' in obj &&
+    typeof (obj as any).role === 'string' &&
+    ['user', 'assistant'].includes((obj as any).role) &&
+    typeof (obj as any).content === 'string'
+  );
+};
+
+const isConversationData = (obj: unknown): obj is ConversationData => {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const conv = obj as any;
+  if (!('messages' in conv) || !Array.isArray(conv.messages)) return false;
+  return conv.messages.every((msg: unknown) => isConversationMessage(msg));
+};
+
+const isConversationArray = (obj: unknown): obj is ConversationMessage[] => {
+  return Array.isArray(obj) && obj.every((item: unknown) => isConversationMessage(item));
+};
+
+const safelyExtractConversation = (conversation: unknown): ConversationData | null => {
+  if (!conversation) return null;
+  
+  if (isConversationData(conversation)) {
+    return conversation;
+  }
+  
+  if (isConversationArray(conversation)) {
+    return { messages: conversation };
+  }
+  
+  if (typeof conversation === 'object' && conversation !== null) {
+    const conv = conversation as any;
+    
+    if ('data' in conv && isConversationArray(conv.data)) {
+      return { messages: conv.data };
+    }
+    
+    if ('history' in conv && isConversationArray(conv.history)) {
+      return { messages: conv.history };
+    }
+    
+    if ('chat' in conv && isConversationArray(conv.chat)) {
+      return { messages: conv.chat };
+    }
+  }
+  
+  console.warn('Unable to parse conversation data:', conversation);
+  return null;
 };
 // Styles moved outside component (prevents recreation on every render)
 const styles = {
@@ -96,7 +162,12 @@ export default function Home() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatHistory, loading]);
-
+  
+  // Add this after the messagesEndRef line
+  const conversationData = useMemo(() => {
+    if (!data?.conversation) return null;
+    return safelyExtractConversation(data.conversation);
+  }, [data?.conversation]);
   const handleSubmit = useCallback(
     async (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault();
@@ -158,6 +229,15 @@ export default function Home() {
           setProcessingBacktest(true);
           setTimeout(() => {
             setData(json);
+            // Add this block after setData(json);
+            if (json.conversation) {
+              const safeConversation = safelyExtractConversation(json.conversation);
+              if (safeConversation) {
+                console.log('Received conversation data:', safeConversation);
+                // You could update chat history here if needed
+                // setChatHistory(prev => mergeWithServerConversation(prev, safeConversation));
+              }
+            }
             setProcessingBacktest(false);
           }, 500); // Brief delay to show the blue dots
         }
@@ -177,10 +257,15 @@ export default function Home() {
   );
 
   /** Chart Data (memoized with useMemo) */
-  const chartData = useMemo(() => {
-    return data?.chart_data ?? {};
-  }, [data]);
-
+const chartData = useMemo(() => {
+  return data?.chart_data ?? {
+    dates: [],
+    equity: [],
+    drawdown: [],
+    indicators: {},
+    signals: {}
+  };
+}, [data]);
   const equityChart = useMemo(() => {
     if (!chartData.dates || !chartData.equity) return null;
     return {
@@ -353,6 +438,11 @@ export default function Home() {
               }}
             >
               Strategy Assistant
+              {conversationData && (
+                <span style={{ fontSize: '0.875rem', color: '#6b7280', marginLeft: '0.5rem' }}>
+                  ({conversationData.messages.length} messages)
+                </span>
+              )}
             </h2>
           </div>
           

@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from backend.backtest_loop import run_backtest
+import yfinance as yf
 
 def is_valid_ticker_format(ticker):
     """Basic validation for ticker format"""
@@ -26,13 +27,136 @@ def is_valid_ticker_format(ticker):
     
     return True
 
-def validate_strategy_compatibility(strategy_data, indicators_registry, operators_registry, strategies_registry):
+# Ticker validation cache to avoid repeated yfinance calls
+_ticker_validation_cache = {}
+
+def validate_ticker_exists(ticker):
+    """
+    Validate if a ticker symbol exists and has data available using yfinance.
+    Uses caching to avoid repeated API calls for the same ticker.
+    Returns (is_valid, error_message)
+    """
+    if not ticker or not isinstance(ticker, str):
+        return False, "Invalid ticker format"
+    
+    ticker = ticker.strip().upper()
+    
+    # Basic format check first
+    if not is_valid_ticker_format(ticker):
+        return False, f"Ticker '{ticker}' has invalid format"
+    
+    # Check cache first
+    if ticker in _ticker_validation_cache:
+        cached_result = _ticker_validation_cache[ticker]
+        return cached_result['is_valid'], cached_result['message']
+    
+    try:
+        # Try to fetch recent data to validate ticker exists
+        stock = yf.Ticker(ticker)
+        # Get last 5 days of data to check if ticker is valid
+        hist = stock.history(period="5d")
+        
+        if hist.empty:
+            result = (False, f"No data available for ticker '{ticker}'")
+        else:
+            result = (True, f"Ticker '{ticker}' is valid and has data")
+        
+        # Cache the result
+        _ticker_validation_cache[ticker] = {
+            'is_valid': result[0],
+            'message': result[1]
+        }
+        
+        return result
+    
+    except Exception as e:
+        result = (False, f"Error validating ticker '{ticker}': {str(e)}")
+        
+        # Cache the error result too (to avoid repeated failed calls)
+        _ticker_validation_cache[ticker] = {
+            'is_valid': result[0],
+            'message': result[1]
+        }
+        
+        return result
+
+def get_alternative_ticker_from_gemini(user_input, invalid_ticker, client):
+    """Ask Gemini to find an alternative ticker from the user input"""
+    
+    alternative_prompt = f"""
+    The user input was: "{user_input}"
+    
+    You previously extracted the ticker "{invalid_ticker}" but this ticker is not valid or doesn't exist.
+    
+    Please analyze the user input again and:
+    1. If there's a company name mentioned, provide the correct stock ticker symbol
+    2. If the ticker was misspelled, provide the correct spelling
+    3. If no specific company/ticker is mentioned, return "SPY" as default
+    
+    Common company name to ticker mappings:
+    - Apple -> AAPL
+    - Microsoft -> MSFT  
+    - Google/Alphabet -> GOOGL
+    - Amazon -> AMZN
+    - Tesla -> TSLA
+    - Meta/Facebook -> META
+    - Netflix -> NFLX
+    - NVIDIA -> NVDA
+    - Berkshire Hathaway -> BRK.B
+    
+    Return ONLY the ticker symbol (e.g., "AAPL"), nothing else.
+    """
+    
+    result = safe_gemini_call(client, alternative_prompt, context="ticker correction")
+    
+    if not result["success"]:
+        print(f"Error getting alternative ticker: {result['error']}")
+        return "SPY"  # Default fallback
+    
+    alternative_ticker = result["response"].strip().strip('"').upper()
+    
+    # Validate the alternative ticker
+    is_valid, message = validate_ticker_exists(alternative_ticker)
+    if is_valid:
+        print(f"Found valid alternative ticker: {alternative_ticker}")
+        return alternative_ticker
+    else:
+        print(f"Alternative ticker {alternative_ticker} is also invalid: {message}")
+        return "SPY"  # Default fallback
+
+def validate_strategy_compatibility(strategy_data, indicators_registry, operators_registry, strategies_registry, client=None):
     """
     Check if a strategy uses supported indicators, operators, and patterns.
-    Returns (is_compatible, feedback_message)
+    Also validates ticker availability.
+    Returns (is_compatible, feedback_message, updated_strategy_data)
     """
     issues = []
     suggestions = []
+    updated_strategy = strategy_data.copy()  # Make a copy to potentially update ticker
+    
+    # Validate ticker if present
+    ticker = strategy_data.get('ticker')
+    if ticker:
+        is_valid_ticker, ticker_message = validate_ticker_exists(ticker)
+        if not is_valid_ticker:
+            print(f"Ticker validation failed: {ticker_message}")
+            if client:
+                # Try to get alternative ticker from Gemini if client is available
+                alternative_ticker = get_alternative_ticker_from_gemini("", ticker, client)
+                print(f"Trying alternative ticker: {alternative_ticker}")
+                
+                is_valid_alt, alt_message = validate_ticker_exists(alternative_ticker)
+                if is_valid_alt:
+                    print(f"Alternative ticker {alternative_ticker} is valid: {alt_message}")
+                    updated_strategy['ticker'] = alternative_ticker
+                    suggestions.append(f"Changed ticker from '{ticker}' to '{alternative_ticker}' (original ticker was not available)")
+                else:
+                    issues.append(f"Ticker '{ticker}' is not valid or has no data available")
+                    issues.append(f"Alternative ticker '{alternative_ticker}' is also invalid")
+            else:
+                issues.append(f"Ticker '{ticker}' is not valid or has no data available")
+        else:
+            print(f"Ticker validation successful: {ticker_message}")
     
     # Check if it matches a basic strategy pattern
     if 'indicators' in strategy_data and 'entry' in strategy_data and 'exit' in strategy_data:
@@ -127,10 +251,13 @@ def validate_strategy_compatibility(strategy_data, indicators_registry, operator
         
         feedback += f"\n💬 Try rephrasing your strategy using the supported components above!"
         
-        return False, feedback
+        return False, feedback, updated_strategy
     
     # If no issues, strategy is compatible
-    return True, "Your strategy looks compatible with our system! 🎉"
+    success_message = "Your strategy looks compatible with our system! 🎉"
+    if suggestions:
+        success_message += "\n\n" + "\n".join(f"✅ {s}" for s in suggestions)
+    return True, success_message, updated_strategy
 
 load_dotenv()
 
@@ -157,14 +284,43 @@ class ConversationState:
         if extracted_entities.get("ticker") and extracted_entities["ticker"] != "SPY":
             new_ticker = extracted_entities["ticker"].upper()  # Normalize to uppercase
             if is_valid_ticker_format(new_ticker) and self.ticker != new_ticker:
-                self.ticker = new_ticker
-                updated_fields.append("ticker")
+                # Validate ticker exists with actual data
+                is_valid_ticker, ticker_message = validate_ticker_exists(new_ticker)
+                if is_valid_ticker:
+                    self.ticker = new_ticker
+                    updated_fields.append("ticker")
+                    print(f"✅ Ticker validation successful: {ticker_message}")
+                else:
+                    print(f"❌ Ticker validation failed: {ticker_message}")
+                    # Try to get alternative ticker from Gemini
+                    # Note: We'd need access to the Gemini client here, but for now let's use a simple mapping
+                    company_to_ticker = {
+                        "APPLE": "AAPL",
+                        "MICROSOFT": "MSFT", 
+                        "GOOGLE": "GOOGL",
+                        "AMAZON": "AMZN",
+                        "TESLA": "TSLA",
+                        "META": "META",
+                        "NETFLIX": "NFLX",
+                        "NVIDIA": "NVDA"
+                    }
+                    
+                    alternative_ticker = company_to_ticker.get(new_ticker, "SPY")
+                    is_valid_alt, alt_message = validate_ticker_exists(alternative_ticker)
+                    if is_valid_alt:
+                        print(f"✅ Using alternative ticker: {alternative_ticker}")
+                        self.ticker = alternative_ticker
+                        updated_fields.append("ticker")
+                    else:
+                        print(f"❌ Alternative ticker {alternative_ticker} also invalid, defaulting to SPY")
+                        self.ticker = "SPY"
+                        updated_fields.append("ticker")
         
         # Update indicators
         new_indicators = extracted_entities.get("strategy", {}).get("indicators", [])
         for new_ind in new_indicators:
-            # Check if this indicator is already in our list
-            existing = next((ind for ind in self.indicators if ind.get("type") == new_ind.get("type")), None)
+            # Check if this exact indicator (by id) is already in our list
+            existing = next((ind for ind in self.indicators if ind.get("id") == new_ind.get("id")), None)
             if not existing:
                 self.indicators.append(new_ind)
                 updated_fields.append(f"indicator_{new_ind.get('type')}")
@@ -278,19 +434,36 @@ def get_conversation_state(conversation_history):
     
     return conversation_states[conversation_id]
 
-# Load registries
-print("Loading registries...")
-# Note: Ticker registry removed - system now accepts any valid ticker format via is_valid_ticker_format()
+# Registry cache to avoid loading on every import
+_registries_cache = None
 
-with open('backend/indicators.json') as f:
-    indicators_registry = json.load(f)['indicators']
-print("Indicators loaded:", list(indicators_registry.keys()))
-with open('backend/operators.json') as f:
-    operators_registry = json.load(f)['operators']
-print("Operators loaded:", {k: v for k, v in operators_registry.items()})
-with open('backend/basic_strategies.json') as f:
-    strategies_registry = json.load(f)['strategies']
-print("Strategies loaded:", list(strategies_registry.keys()))
+def get_registries():
+    """Load registries with caching to improve performance"""
+    global _registries_cache
+    
+    if _registries_cache is None:
+        print("Loading registries...")
+        # Note: Ticker registry removed - system now accepts any valid ticker format via is_valid_ticker_format()
+        
+        with open('backend/indicators.json') as f:
+            indicators_registry = json.load(f)['indicators']
+        print("Indicators loaded:", list(indicators_registry.keys()))
+        
+        with open('backend/operators.json') as f:
+            operators_registry = json.load(f)['operators']
+        print("Operators loaded:", {k: v for k, v in operators_registry.items()})
+        
+        with open('backend/basic_strategies.json') as f:
+            strategies_registry = json.load(f)['strategies']
+        print("Strategies loaded:", list(strategies_registry.keys()))
+        
+        _registries_cache = {
+            'indicators': indicators_registry,
+            'operators': operators_registry,
+            'strategies': strategies_registry
+        }
+    
+    return _registries_cache['indicators'], _registries_cache['operators'], _registries_cache['strategies']
 
 def safe_gemini_call(client, prompt, context="general", max_retries=3, retry_delay=2):
     """
@@ -667,11 +840,13 @@ def decode_natural_language(user_input, conversation_history=None):
         strategy_info = conv_state.to_strategy_config()
         
         # Validate strategy compatibility with our registries
-        is_compatible, feedback_message = validate_strategy_compatibility(
+        indicators_registry, operators_registry, strategies_registry = get_registries()
+        is_compatible, feedback_message, updated_strategy_config = validate_strategy_compatibility(
             strategy_info["strategy_config"], 
             indicators_registry, 
             operators_registry, 
-            strategies_registry
+            strategies_registry,
+            client
         )
         
         if not is_compatible:
@@ -680,7 +855,13 @@ def decode_natural_language(user_input, conversation_history=None):
         
         print("[CONVERSATION STATE] Strategy is compatible! Running backtest...")
         
-        # Run backtest with accumulated information
+        # Update the conversation state with any ticker corrections from validation
+        if updated_strategy_config.get('ticker') != strategy_info["strategy_config"].get('ticker'):
+            conv_state.ticker = updated_strategy_config.get('ticker')
+            print(f"[TICKER VALIDATION] Updated ticker to: {conv_state.ticker}")
+        
+        # Run backtest with accumulated information (use updated config if ticker changed)
+        strategy_info["strategy_config"] = updated_strategy_config
         result = run_backtest(
             ticker=strategy_info["ticker"],
             strategy="CUSTOM",
@@ -702,6 +883,20 @@ def decode_natural_language(user_input, conversation_history=None):
             conversation_history
         )
         return {"conversation": True, "message": response_msg, "needs_clarification": True}
+
+# Fast path removed - not needed
+
+# Performance monitoring
+performance_stats = {
+    'registry_loads': 0,
+    'ticker_validations': 0,
+    'gemini_calls': 0,
+    'cache_hits': 0
+}
+
+def get_performance_stats():
+    """Get current performance statistics"""
+    return performance_stats.copy()
 
 # Example usage
 if __name__ == "__main__":

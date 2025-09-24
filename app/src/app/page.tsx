@@ -243,7 +243,7 @@ export default function Home() {
       setNlInput(''); // Clear input immediately
       
       try {
-        const res = await fetch('http://localhost:8000/natural_backtest', {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/natural_backtest`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 

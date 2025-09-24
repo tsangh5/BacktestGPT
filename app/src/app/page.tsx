@@ -76,6 +76,63 @@ type ChartObj = {
     datasets: ChartDataset<'line'>[]; 
   }; 
 };
+// Add after your existing type definitions
+const createPlaceholderChart = (label: string, color: string) => ({
+  labels: ['No Data Available'],
+  datasets: [
+    {
+      label: label,
+      data: [0],
+      borderColor: color,
+      backgroundColor: color.replace('rgb', 'rgba').replace(')', ', 0.1)'),
+      fill: false,
+      pointRadius: 0,
+    },
+  ],
+});
+
+const chartOptions = {
+  maintainAspectRatio: false,
+  plugins: {
+    legend: {
+      display: true,
+    },
+  },
+  scales: {
+    x: {
+      display: true,
+    },
+    y: {
+      display: true,
+    },
+  },
+};
+
+const placeholderChartOptions = {
+  ...chartOptions,
+  plugins: {
+    ...chartOptions.plugins,
+    tooltip: {
+      enabled: false,
+    },
+  },
+  scales: {
+    x: {
+      display: false,
+    },
+    y: {
+      display: false,
+    },
+  },
+  elements: {
+    line: {
+      borderWidth: 0,
+    },
+    point: {
+      radius: 0,
+    },
+  },
+};
 // Add these type guard functions
 const isConversationMessage = (obj: unknown): obj is ConversationMessage => {
   return (
@@ -257,17 +314,20 @@ export default function Home() {
   );
 
   /** Chart Data (memoized with useMemo) */
-const chartData = useMemo(() => {
-  return data?.chart_data ?? {
-    dates: [],
-    equity: [],
-    drawdown: [],
-    indicators: {},
-    signals: {}
-  };
-}, [data]);
-  const equityChart = useMemo(() => {
-    if (!chartData.dates || !chartData.equity) return null;
+  const chartData = useMemo(() => {
+    return data?.chart_data ?? {
+      dates: [],
+      equity: [],
+      drawdown: [],
+      indicators: {},
+      signals: {}
+    };
+  }, [data]);
+  const hasData = useMemo(() => {
+    return data && chartData.dates && chartData.dates.length > 0;
+  }, [data, chartData]);
+const equityChart = useMemo(() => {
+  if (hasData) {
     return {
       labels: chartData.dates,
       datasets: [
@@ -280,10 +340,12 @@ const chartData = useMemo(() => {
         },
       ],
     };
-  }, [chartData]);
+  }
+  return createPlaceholderChart('Equity Curve', 'rgb(59, 130, 246)');
+}, [chartData, hasData]);
 
-  const drawdownChart = useMemo(() => {
-    if (!chartData.dates || !chartData.drawdown) return null;
+const drawdownChart = useMemo(() => {
+  if (hasData) {
     return {
       labels: chartData.dates,
       datasets: [
@@ -296,10 +358,12 @@ const chartData = useMemo(() => {
         },
       ],
     };
-  }, [chartData]);
+  }
+  return createPlaceholderChart('Drawdown (%)', 'rgb(239, 68, 68)');
+}, [chartData, hasData]);
 
-  const indicatorCharts = useMemo<ChartObj[]>(() => {
-    if (!chartData.indicators) return [];
+const indicatorCharts = useMemo<ChartObj[]>(() => {
+  if (hasData && chartData.indicators) {
     return Object.entries(chartData.indicators).map(([name, values]) => ({
       name,
       chart: {
@@ -315,10 +379,22 @@ const chartData = useMemo(() => {
         ],
       },
     }));
-  }, [chartData]);
+  }
+  // Return placeholder indicators
+  return [
+    {
+      name: 'Moving Average',
+      chart: createPlaceholderChart('Moving Average', 'rgb(34, 197, 94)')
+    },
+    {
+      name: 'RSI',
+      chart: createPlaceholderChart('RSI', 'rgb(168, 85, 247)')
+    }
+  ];
+}, [chartData, hasData]);
 
-  const signalCharts = useMemo<ChartObj[]>(() => {
-    if (!chartData.signals) return [];
+const signalCharts = useMemo<ChartObj[]>(() => {
+  if (hasData && chartData.signals) {
     return Object.entries(chartData.signals).map(([name, values]) => ({
       name,
       chart: {
@@ -334,7 +410,19 @@ const chartData = useMemo(() => {
         ],
       },
     }));
-  }, [chartData]);
+  }
+  // Return placeholder signals
+  return [
+    {
+      name: 'Buy Signals',
+      chart: createPlaceholderChart('Buy Signals', 'rgb(34, 197, 94)')
+    },
+    {
+      name: 'Sell Signals',
+      chart: createPlaceholderChart('Sell Signals', 'rgb(239, 68, 68)')
+    }
+  ];
+}, [chartData, hasData]);
 
   /** Metric Styling */
   const getMetricClassName = useCallback(
@@ -376,7 +464,7 @@ const chartData = useMemo(() => {
 
   /** Value Formatter */
   const formatValue = useCallback((value: number | undefined, format: string) => {
-    if (value === undefined) return '0.00';
+    if (value === undefined) return hasData ? 'N/A' : '--';
     switch (format) {
       case 'currency':
         return `$${value.toFixed(2)}`;
@@ -387,7 +475,7 @@ const chartData = useMemo(() => {
       default:
         return value.toFixed(2);
     }
-  }, []);
+  }, [hasData]);
 
   /** Render */
   return (
@@ -437,7 +525,7 @@ const chartData = useMemo(() => {
                 margin: 0 
               }}
             >
-              Strategy Assistant
+              Strategy Assistant {!hasData && <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>(awaiting data)</span>}
               {conversationData && (
                 <span style={{ fontSize: '0.875rem', color: '#6b7280', marginLeft: '0.5rem' }}>
                   ({conversationData.messages.length} messages)
@@ -611,7 +699,7 @@ const chartData = useMemo(() => {
         )}
 
         {/* Results */}
-        {!loading && !processingBacktest && data && (
+        {
           <div 
             className="content-section"
             style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}
@@ -636,7 +724,7 @@ const chartData = useMemo(() => {
                   color: '#111827' 
                 }}
               >
-                Performance Metrics
+                Performance Metrics {!hasData && <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>(awaiting data)</span>}
               </h2>
               <div 
                 className="metrics-responsive"
@@ -707,6 +795,7 @@ const chartData = useMemo(() => {
                   }}
                 >
                   Equity Curve
+                  {!hasData && <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>(awaiting data)</span>}
                 </h2>
                 <div 
                   className="chart-wrapper"
@@ -735,7 +824,7 @@ const chartData = useMemo(() => {
                     color: '#111827' 
                   }}
                 >
-                  Drawdown (%)
+                  Drawdown (%) {!hasData && <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>(awaiting data)</span>}
                 </h2>
                 <div 
                   className="chart-wrapper"
@@ -766,7 +855,7 @@ const chartData = useMemo(() => {
                     color: '#111827' 
                   }}
                 >
-                  Indicators
+                  Indicators {!hasData && <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>(awaiting data)</span>}
                 </h2>
                 <div 
                   className="indicators-grid"
@@ -823,7 +912,7 @@ const chartData = useMemo(() => {
                     color: '#111827' 
                   }}
                 >
-                  Signals
+                  Signals {!hasData && <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>(awaiting data)</span>}
                 </h2>
                 <div 
                   className="indicators-grid"
@@ -861,7 +950,7 @@ const chartData = useMemo(() => {
               </div>
             )}
           </div>
-        )}
+        }
       </div>
     </div>
   );

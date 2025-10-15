@@ -14,6 +14,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+async def root():
+    """Health check endpoint for Render"""
+    return {"message": "BacktestGPT API is running", "status": "healthy"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy"}
+
 
 class BacktestRequest(BaseModel):
     ticker: str = "SPY"

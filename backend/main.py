@@ -1,14 +1,17 @@
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, Request, HTTPException
-from typing import Union, Optional
 from pydantic import BaseModel
-from backend.backtest_loop import run_backtest
+
+from backend.backtest_loop import run_backtest, run_backtest_spec
 from backend.llm_decode import decode_natural_language
+from backend.schema import StrategySpec
 
 app = FastAPI(
     title="BacktestGPT API",
     description="Conversational AI-powered trading strategy backtesting",
-    version="1.0.0",
+    version="2.0.0",
 )
 # Wildcard origins require credentials to be disabled per the CORS spec;
 # the API is token-free so no credentials are needed.
@@ -20,63 +23,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 async def root():
-    """Health check endpoint for Render"""
     return {"message": "BacktestGPT API is running", "status": "healthy"}
+
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     return {"status": "healthy"}
 
 
 class BacktestRequest(BaseModel):
+    """Legacy named-strategy request (SMA crossover or RSI mean-reversion)."""
+
     ticker: str = "SPY"
     strategy: str = "SMA"
-    start_date: Optional[str] = "2010-01-01"
-    end_date: Optional[str] = "2025-01-01"
-    initial_cash: Optional[float] = 100000
+    start_date: Optional[str] = "2015-01-01"
+    end_date: Optional[str] = None
+    initial_cash: Optional[float] = 100_000
     fees: Optional[float] = 0.001
-    # Strategy-specific parameters
     sma_fast: Optional[int] = 5
     sma_slow: Optional[int] = 20
     rsi_period: Optional[int] = 14
     rsi_oversold: Optional[int] = 30
     rsi_overbought: Optional[int] = 70
-    momentum_threshold: Optional[float] = 0.02
-    stop_loss: Optional[float] = -0.01
 
-# New model for natural language input
+
 class NaturalBacktestRequest(BaseModel):
     input: str
     conversation_history: Optional[list] = []
 
+
 @app.post("/backtest")
 async def backtest_endpoint(request: BacktestRequest):
-    """Main backtest endpoint"""
+    """Run a named preset strategy (SMA crossover or RSI)."""
     try:
-        # Extract strategy parameters
-        strategy_params = {}
-        
-        if request.strategy == "SMA":
-            strategy_params = {
-                'sma_fast': request.sma_fast,
-                'sma_slow': request.sma_slow
-            }
-        elif request.strategy == "RSI":
-            strategy_params = {
-                'rsi_period': request.rsi_period,
-                'rsi_oversold': request.rsi_oversold,
-                'rsi_overbought': request.rsi_overbought
-            }
-        elif request.strategy == "MOMENTUM":
-            strategy_params = {
-                'momentum_threshold': request.momentum_threshold,
-                'stop_loss': request.stop_loss
-            }
-        
-        # Run backtest
         result = run_backtest(
             ticker=request.ticker,
             strategy=request.strategy,
@@ -84,41 +66,40 @@ async def backtest_endpoint(request: BacktestRequest):
             end_date=request.end_date,
             initial_cash=request.initial_cash,
             fees=request.fees,
-            **strategy_params
+            sma_fast=request.sma_fast,
+            sma_slow=request.sma_slow,
+            rsi_period=request.rsi_period,
+            rsi_oversold=request.rsi_oversold,
+            rsi_overbought=request.rsi_overbought,
         )
-        
-        # Handle errors
         if result.get("error"):
             raise HTTPException(status_code=400, detail=result["error"])
-        
         return result
-        
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
 
-# New endpoint for natural language backtest
+
+@app.post("/backtest_spec")
+async def backtest_spec_endpoint(spec: StrategySpec):
+    """Run a fully-specified strategy AST directly (no LLM involved)."""
+    result = run_backtest_spec(spec)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
 @app.post("/natural_backtest")
 async def natural_backtest_endpoint(request: NaturalBacktestRequest):
-    """Backtest endpoint for natural language input"""
-    import traceback
-    print(f"[natural_backtest] Received text input: {request.input}")
+    """Conversational natural-language backtesting."""
     try:
         result = decode_natural_language(request.input, request.conversation_history)
         if result is None:
-            print("[natural_backtest] Error: decode_natural_language returned None")
-            raise HTTPException(status_code=500, detail="Internal error: No result returned.")
-        
-        # If there's an error in the result, return it as part of the response (not as HTTP error)
-        # This allows the frontend to display the helpful error message
-        if result.get("error"):
-            print(f"[natural_backtest] Parsing error: {result['error']}")
-            return result  # Return the error as part of the JSON response
-        
-        print(f"[natural_backtest] Success. Returning result.")
+            raise HTTPException(status_code=500, detail="Internal error: no result returned.")
         return result
     except Exception as e:
-        print(f"[natural_backtest] Unexpected error: {str(e)}")
+        import traceback
+
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")

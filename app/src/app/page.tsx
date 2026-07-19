@@ -241,10 +241,10 @@ export default function Home() {
           };
           setChatHistory(prev => [...prev, errorMessage]);
         } else {
-          // Success - show results and confirmation message
+          // Success - show the model's own confirmation when provided
           const successMessage: ChatMessage = {
             role: 'assistant',
-            content: 'Great! I\'ve run your backtest. Here are the results:',
+            content: json.message || 'Great! I\'ve run your backtest. Here are the results:',
             timestamp: new Date()
           };
           setChatHistory(prev => [...prev, successMessage]);

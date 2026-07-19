@@ -1,412 +1,250 @@
-import vectorbt as vbt
+"""Backtest engine: executes a validated StrategySpec against market data.
+
+The spec is a typed AST (see schema.py), so execution is a deterministic
+tree-walk — no LLM output is interpreted here. Anything schema-valid runs;
+anything else never reaches this module.
+"""
+from datetime import date
+from typing import Dict, Optional
+
 import pandas as pd
-import numpy as np
-import yfinance as yf
-from typing import Optional
+import vectorbt as vbt
 
-class VectorBTBacktester:
-    def __init__(self, ticker: str, start_date: str = "2010-01-01", end_date: str = "2025-01-01"):
-        """Initialize with data fetching"""
-        self.ticker = ticker
-        try:
-            self.data_fetcher = vbt.YFData.download(
-                ticker, 
-                start=start_date, 
-                end=end_date,
-                missing_index='drop'  # Handle missing data gracefully
+from backend.schema import (
+    Condition,
+    Indicator,
+    INDICATOR_OUTPUTS,
+    Operand,
+    StrategySpec,
+)
+
+DEFAULT_WINDOWS = {"SMA": 20, "EMA": 20, "RSI": 14, "BB": 20}
+
+
+def fetch_price_data(ticker: str, start_date: str, end_date: Optional[str]) -> Dict[str, pd.Series]:
+    end = end_date or date.today().isoformat()
+    data = vbt.YFData.download(ticker, start=start_date, end=end, missing_index="drop")
+    price = {col: data.get(col) for col in ("Close", "Open", "High", "Low", "Volume")}
+    if price["Close"] is None or len(price["Close"]) == 0:
+        raise ValueError(f"No price data returned for '{ticker}' between {start_date} and {end}")
+    return price
+
+
+def compute_indicators(
+    price: Dict[str, pd.Series], indicators: list[Indicator]
+) -> Dict[str, Dict[str, pd.Series]]:
+    """Compute every declared indicator, keyed by id then output name."""
+    values: Dict[str, Dict[str, pd.Series]] = {}
+    for ind in indicators:
+        series = price[ind.column]
+        window = ind.window or DEFAULT_WINDOWS.get(ind.type)
+        if ind.type == "SMA":
+            values[ind.id] = {"ma": vbt.MA.run(series, window).ma}
+        elif ind.type == "EMA":
+            values[ind.id] = {"ma": vbt.MA.run(series, window, ewm=True).ma}
+        elif ind.type == "RSI":
+            values[ind.id] = {"rsi": vbt.RSI.run(series, window=window).rsi}
+        elif ind.type == "BB":
+            bb = vbt.BBANDS.run(series, window=window, alpha=ind.std or 2.0)
+            values[ind.id] = {"middle": bb.middle, "upper": bb.upper, "lower": bb.lower}
+        elif ind.type == "MACD":
+            macd = vbt.MACD.run(
+                series,
+                fast_window=ind.fast_window or 12,
+                slow_window=ind.slow_window or 26,
+                signal_window=ind.signal_window or 9,
             )
-            self.close = self.data_fetcher.get('Close')
-            self.high = self.data_fetcher.get('High') 
-            self.low = self.data_fetcher.get('Low')
-            self.volume = self.data_fetcher.get('Volume')
-            self.open = self.data_fetcher.get('Open')
-        except Exception as e:
-            raise Exception(f"Error fetching data for {ticker}: {str(e)}")
-    
-    def add_indicators(self, **kwargs):
-        """Add technical indicators with flexible parameter handling"""
-        try:
-            # Handle SMA indicators
-            sma_fast = kwargs.get('sma_fast', 5)
-            sma_slow = kwargs.get('sma_slow', 20)
-            self.sma_fast = vbt.MA.run(self.close, sma_fast)
-            self.sma_slow = vbt.MA.run(self.close, sma_slow)
-            
-            # Handle RSI
-            rsi_period = kwargs.get('rsi_period', 14)
-            self.rsi = vbt.RSI.run(self.close, window=rsi_period)
-            
-            # Handle Bollinger Bands
-            bb_window = kwargs.get('bb_window', 20)
-            self.bb = vbt.BBANDS.run(self.close, window=bb_window)
-            
-            # Handle any additional SMAs from indicators config
-            for key, value in kwargs.items():
-                if key.startswith('sma') and key not in ['sma_fast', 'sma_slow']:
-                    # Extract period from key like 'sma50_window' -> 50
-                    try:
-                        if '_window' in key:
-                            period = int(key.replace('sma', '').replace('_window', ''))
-                        else:
-                            period = int(key.replace('sma', ''))
-                        setattr(self, f'sma{period}', vbt.MA.run(self.close, period))
-                    except ValueError:
-                        continue
-            
-            return self
-        except Exception as e:
-            raise Exception(f"Error calculating indicators: {str(e)}")
-    
-    def generate_signals(self, strategy: str = "SMA", entry=None, exit=None, **kwargs):
-        """Generate trading signals based on strategy or custom entry/exit rules"""
-        try:
-            # If custom entry/exit rules are provided, use them
-            if entry and exit:
-                entries = self._apply_signal_rule(entry)
-                exits = self._apply_signal_rule(exit)
-            else:
-                if strategy == "SMA":
-                    entries = self.sma_fast.ma_crossed_above(self.sma_slow.ma)
-                    exits = self.sma_fast.ma_crossed_below(self.sma_slow.ma)
-                elif strategy == "RSI":
-                    rsi_oversold = kwargs.get('rsi_oversold', 30)
-                    rsi_overbought = kwargs.get('rsi_overbought', 70)
-                    entries = self.rsi.rsi < rsi_oversold
-                    exits = self.rsi.rsi > rsi_overbought
-                elif strategy == "BB_MEAN_REVERSION":
-                    entries = self.close < self.bb.lower
-                    exits = self.close > self.bb.middle
-                elif strategy == "MOMENTUM":
-                    returns = self.close.pct_change()
-                    momentum_threshold = kwargs.get('momentum_threshold', 0.02)
-                    stop_loss = kwargs.get('stop_loss', -0.01)
-                    entries = returns > momentum_threshold
-                    exits = returns < stop_loss
-                else:
-                    entries = self.sma_fast.ma_crossed_above(self.sma_slow.ma)
-                    exits = self.sma_fast.ma_crossed_below(self.sma_slow.ma)
-            
-            self.entries = entries
-            self.exits = exits
-            return self
-        except Exception as e:
-            raise Exception(f"Error generating signals: {str(e)}")
+            values[ind.id] = {"macd": macd.macd, "signal": macd.signal, "hist": macd.hist}
+    return values
 
-    def _apply_signal_rule(self, rule):
-        """Apply a signal rule from config"""
-        if not isinstance(rule, dict):
-            return pd.Series([False]*len(self.close), index=self.close.index)
-        
-        op = rule.get('op')
-        args = rule.get('args', [])
-        
-        if not op or len(args) < 2:
-            return pd.Series([False]*len(self.close), index=self.close.index)
-        
-        try:
-            left = self._resolve_series(args[0])
-            right = self._resolve_series(args[1])
-            
-            # Ensure both are pandas Series for vectorbt operations
-            if not isinstance(left, pd.Series):
-                left = pd.Series([left] * len(self.close), index=self.close.index)
-            if not isinstance(right, pd.Series):
-                right = pd.Series([right] * len(self.close), index=self.close.index)
-            
-            if op == 'cross_above':
-                # For cross above, we need to detect when left crosses above right
-                return (left > right) & (left.shift(1) <= right.shift(1))
-            elif op == 'cross_below':
-                # For cross below, we need to detect when left crosses below right
-                return (left < right) & (left.shift(1) >= right.shift(1))
-            elif op in ['gt', 'greater_than']:
-                return left > right
-            elif op in ['lt', 'less_than']:
-                return left < right
-            elif op in ['eq', 'equal_to']:
-                return left == right
-            elif op in ['gte', 'greater_than_or_equal']:
-                return left >= right
-            elif op in ['lte', 'less_than_or_equal']:
-                return left <= right
-            else:
-                print(f"Unknown operator: {op}")
-                return pd.Series([False]*len(self.close), index=self.close.index)
-                
-        except Exception as e:
-            print(f"Error applying signal rule: {e}")
-            return pd.Series([False]*len(self.close), index=self.close.index)
 
-    def _resolve_series(self, ref):
-        """Resolve a string reference or number to a pandas Series or value"""
-        # If ref is a number, return as-is
-        if isinstance(ref, (int, float)):
-            return ref
-        
-        # If ref is a string that can be converted to float, return as float
-        if isinstance(ref, str):
-            try:
-                if ref.replace('.', '', 1).replace('-', '', 1).isdigit():
-                    return float(ref)
-            except:
-                pass
-        
-        # Handle string references to price data and indicators
-        if isinstance(ref, str):
-            ref_lower = ref.lower()
-            
-            # Basic price data
-            if ref_lower == 'close':
-                return self.close
-            elif ref_lower == 'open':
-                return self.open
-            elif ref_lower == 'high':
-                return self.high
-            elif ref_lower == 'low':
-                return self.low
-            elif ref_lower == 'volume':
-                return self.volume
-            
-            # Handle indicator references like 'SMA50.ma', 'RSI14.rsi'
-            if '.' in ref:
-                ind_name, attr = ref.split('.', 1)
-                ind_name = ind_name.lower()
-                
-                # Map common indicator references
-                if ind_name.startswith('sma'):
-                    # Extract period from name like 'sma50'
-                    try:
-                        if ind_name == 'sma_fast' or ind_name == 'smafast':
-                            ind_obj = self.sma_fast
-                        elif ind_name == 'sma_slow' or ind_name == 'smaslow':
-                            ind_obj = self.sma_slow
-                        else:
-                            # Try to find SMA with specific period
-                            period = ''.join(filter(str.isdigit, ind_name))
-                            if period:
-                                ind_obj = getattr(self, f'sma{period}', None)
-                            else:
-                                ind_obj = None
-                        
-                        if ind_obj and hasattr(ind_obj, attr):
-                            return getattr(ind_obj, attr)
-                    except:
-                        pass
-                
-                elif ind_name.startswith('rsi'):
-                    if hasattr(self, 'rsi') and hasattr(self.rsi, attr):
-                        return getattr(self.rsi, attr)
-                
-                elif ind_name.startswith('bb'):
-                    if hasattr(self, 'bb') and hasattr(self.bb, attr):
-                        return getattr(self.bb, attr)
-        
-        # Fallback: return zeros
-        print(f"Warning: Could not resolve reference '{ref}', using zeros")
-        return pd.Series([0]*len(self.close), index=self.close.index)
+def resolve_operand(
+    operand: Operand,
+    price: Dict[str, pd.Series],
+    indicator_values: Dict[str, Dict[str, pd.Series]],
+    indicator_types: Dict[str, str],
+):
+    if operand.kind == "constant":
+        return operand.value
+    if operand.kind == "price":
+        return price[operand.column]
+    outputs = indicator_values[operand.indicator_id]
+    # Default to the indicator's primary output when unspecified
+    output = operand.output or INDICATOR_OUTPUTS[indicator_types[operand.indicator_id]][0]
+    return outputs[output]
 
-    def run_backtest(self, initial_cash: float = 100000, fees: float = 0.001):
-        """Run the backtest"""
-        try:
-            self.portfolio = vbt.Portfolio.from_signals(
-                close=self.close,
-                entries=self.entries,
-                exits=self.exits,
-                init_cash=initial_cash,
-                fees=fees,
-                freq='D'
-            )
-            return self
-        except Exception as e:
-            raise Exception(f"Error running backtest: {str(e)}")
-    
-    def get_metrics(self):
-        """Get comprehensive performance metrics"""
-        try:
-            stats = self.portfolio.stats()
-            start_value = stats['Start Value']
-            end_value = float(stats['End Value'])
-            years = float((self.close.index[-1] - self.close.index[0]).days / 365.25)
-            cagr = (end_value / start_value) ** (1 / years) - 1
-            
-            # Handle NaN values gracefully
-            def safe_float(value, default=0.0):
-                return float(value) if not pd.isna(value) else default
-            
-            return {
-                "start_value": start_value,
-                "end_value": end_value,
-                "total_return": safe_float(stats['Total Return [%]']),
-                "CAGR": cagr * 100,
-                "max_drawdown": safe_float(stats['Max Drawdown [%]']),
-                "sortino_ratio": safe_float(stats.get("Sortino Ratio", 0.0)),
-                "sharpe_ratio": safe_float(stats['Sharpe Ratio']),
-                "win_rate": safe_float(stats['Win Rate [%]']),
-                "avg_winning_trade": safe_float(stats.get("Avg Winning Trade [%]", 0.0)),
-                "avg_losing_trade": safe_float(stats.get("Avg Losing Trade [%]", 0.0)),
-                "profit_factor": safe_float(stats.get("Profit Factor", 0.0)),
-                "total_trades": int(safe_float(stats['Total Trades'])),
-                "years": years
-            }
-        except Exception as e:
-            raise Exception(f"Error calculating metrics: {str(e)}")
-    
-    def get_chart_data(self):
-        """Get data formatted for charts, including indicators and signals"""
-        try:
-            equity_curve = self.portfolio.value()
-            drawdown = self.portfolio.drawdown() * 100
-            
-            chart_data = {
-                "dates": equity_curve.index.strftime('%Y-%m-%d').tolist(),
-                "equity": equity_curve.tolist(),
-                "drawdown": drawdown.tolist(),
-                "close": self.close.tolist()
-            }
-            
-            # Add indicators if available
-            indicators = {}
-            if hasattr(self, 'sma_fast'):
-                indicators['SMA Fast'] = self.sma_fast.ma.tolist()
-            if hasattr(self, 'sma_slow'):
-                indicators['SMA Slow'] = self.sma_slow.ma.tolist()
-            if hasattr(self, 'rsi'):
-                indicators['RSI'] = self.rsi.rsi.tolist()
-            if hasattr(self, 'bb'):
-                indicators['BB Lower'] = self.bb.lower.tolist()
-                indicators['BB Middle'] = self.bb.middle.tolist()
-                indicators['BB Upper'] = self.bb.upper.tolist()
-            
-            # Add any additional SMA indicators
-            for attr_name in dir(self):
-                if attr_name.startswith('sma') and attr_name not in ['sma_fast', 'sma_slow']:
-                    try:
-                        sma_obj = getattr(self, attr_name)
-                        if hasattr(sma_obj, 'ma'):
-                            indicators[f'SMA {attr_name[3:]}'] = sma_obj.ma.tolist()
-                    except:
-                        continue
-            
-            if indicators:
-                chart_data['indicators'] = indicators
-            
-            # Add signals if available
-            signals = {}
-            if hasattr(self, 'entries'):
-                signals['Entries'] = self.entries.astype(int).tolist()
-            if hasattr(self, 'exits'):
-                signals['Exits'] = self.exits.astype(int).tolist()
-            
-            if signals:
-                chart_data['signals'] = signals
-            
-            return chart_data
-        except Exception as e:
-            raise Exception(f"Error preparing chart data: {str(e)}")
 
-# Main function that replaces your original run_backtest
-def run_backtest(ticker: str = "SPY", 
-                strategy: str = "SMA", 
-                start_date: str = "2010-01-01",
-                end_date: str = "2025-01-01",
-                initial_cash: float = 100000,
-                fees: float = 0.001,
-                **strategy_params):
-    """
-    Main backtest function - handles both simple strategy params and complex configs
-    
-    Args:
-        ticker: Stock ticker symbol
-        strategy: Strategy name ("SMA", "RSI", "BB_MEAN_REVERSION", "MOMENTUM")
-        start_date: Start date for backtest
-        end_date: End date for backtest
-        initial_cash: Starting capital
-        fees: Transaction fees (as decimal, e.g., 0.001 = 0.1%)
-        **strategy_params: Strategy-specific parameters or strategy_config
-    
-    Returns:
-        Dictionary with metrics and chart_data
-    """
+def evaluate_condition(
+    cond: Condition,
+    price: Dict[str, pd.Series],
+    indicator_values: Dict[str, Dict[str, pd.Series]],
+    indicator_types: Dict[str, str],
+) -> pd.Series:
+    """Recursively evaluate a condition tree into a boolean signal series."""
+    if cond.op in ("and", "or", "not"):
+        children = [
+            evaluate_condition(sub, price, indicator_values, indicator_types)
+            for sub in cond.conditions
+        ]
+        if cond.op == "not":
+            return ~children[0]
+        result = children[0]
+        for child in children[1:]:
+            result = (result & child) if cond.op == "and" else (result | child)
+        return result
+
+    left = resolve_operand(cond.left, price, indicator_values, indicator_types)
+    right = resolve_operand(cond.right, price, indicator_values, indicator_types)
+
+    if cond.op in ("cross_above", "cross_below"):
+        # Crossings need both sides as series to compare against the prior bar
+        index = price["Close"].index
+        if not isinstance(left, pd.Series):
+            left = pd.Series(left, index=index, dtype=float)
+        if not isinstance(right, pd.Series):
+            right = pd.Series(right, index=index, dtype=float)
+        if cond.op == "cross_above":
+            return (left > right) & (left.shift(1) <= right.shift(1))
+        return (left < right) & (left.shift(1) >= right.shift(1))
+
+    ops = {
+        "gt": lambda a, b: a > b,
+        "lt": lambda a, b: a < b,
+        "gte": lambda a, b: a >= b,
+        "lte": lambda a, b: a <= b,
+    }
+    return ops[cond.op](left, right)
+
+
+def _safe_float(value, default=0.0) -> float:
     try:
-        bt = VectorBTBacktester(ticker, start_date, end_date)
-        
-        # Check if we have a strategy_config (from LLM)
-        if 'strategy_config' in strategy_params:
-            config = strategy_params['strategy_config']
-            print(f"[DEBUG] Processing strategy config: {config}")
-            
-            # Extract indicator parameters
-            indicators = config.get('indicators', [])
-            indicator_kwargs = {}
-            
-            for ind in indicators:
-                print(f"[DEBUG] Processing indicator: {ind}")
-                ind_type = ind.get('type', '').lower()
-                ind_id = ind.get('id', '').lower()
-                params = ind.get('params', {})
-                
-                if ind_type == 'sma' or 'sma' in ind_id:
-                    window = params.get('window', 20)
-                    # Extract period number from id like 'sma50'
-                    period = ''.join(filter(str.isdigit, ind_id))
-                    
-                    if period:
-                        # Store both the generic sma_fast/slow and specific period
-                        if period in ['5', '10', '20', '50']:
-                            indicator_kwargs['sma_fast'] = window if period in ['5', '10'] else indicator_kwargs.get('sma_fast', window)
-                        if period in ['20', '50', '100', '200']:
-                            indicator_kwargs['sma_slow'] = window if period in ['50', '100', '200'] else indicator_kwargs.get('sma_slow', window)
-                        
-                        # Also store the specific period for direct access
-                        indicator_kwargs[f'sma{period}_window'] = window
-                    else:
-                        # Default SMA handling
-                        if 'fast' in ind_id:
-                            indicator_kwargs['sma_fast'] = window
-                        elif 'slow' in ind_id:
-                            indicator_kwargs['sma_slow'] = window
-                
-                elif ind_type == 'rsi':
-                    window = params.get('window', 14)
-                    indicator_kwargs['rsi_period'] = window
-                
-                elif ind_type == 'bb' or ind_type == 'bollinger':
-                    window = params.get('window', 20)
-                    indicator_kwargs['bb_window'] = window
-            
-            print(f"[DEBUG] Indicator kwargs: {indicator_kwargs}")
-            bt.add_indicators(**indicator_kwargs)
-            
-            # Extract entry/exit rules
-            entry = config.get('entry', {})
-            exit = config.get('exit', {})
-            
-            print(f"[DEBUG] Entry rule: {entry}")
-            print(f"[DEBUG] Exit rule: {exit}")
-            
-            bt.generate_signals(strategy, entry=entry, exit=exit)
-            
-        else:
-            # Handle simple strategy parameters (legacy mode)
-            bt.add_indicators(**strategy_params)
-            bt.generate_signals(strategy, **strategy_params)
-        
-        bt.run_backtest(initial_cash, fees)
-        
-        return {
-            "metrics": bt.get_metrics(),
-            "chart_data": bt.get_chart_data()
-        }
-        
-    except Exception as e:
-        print(f"[ERROR] Backtest failed: {str(e)}")
-        return {
-            "error": str(e),
-            "metrics": None,
-            "chart_data": None
-        }
+        return float(value) if not pd.isna(value) else default
+    except (TypeError, ValueError):
+        return default
 
-# Legacy compatibility - keep your old function signature working
-def run_backtest_legacy(ticker="SPY", strategy="SMA"):
-    """Maintains compatibility with your existing code"""
-    return run_backtest(ticker, strategy)
+
+def _build_metrics(portfolio, close: pd.Series) -> dict:
+    stats = portfolio.stats()
+    start_value = _safe_float(stats["Start Value"])
+    end_value = _safe_float(stats["End Value"])
+    years = (close.index[-1] - close.index[0]).days / 365.25
+    cagr = ((end_value / start_value) ** (1 / years) - 1) if years > 0 and start_value > 0 else 0.0
+    return {
+        "start_value": start_value,
+        "end_value": end_value,
+        "total_return": _safe_float(stats["Total Return [%]"]),
+        "CAGR": cagr * 100,
+        "max_drawdown": _safe_float(stats["Max Drawdown [%]"]),
+        "sharpe_ratio": _safe_float(stats["Sharpe Ratio"]),
+        "sortino_ratio": _safe_float(stats.get("Sortino Ratio", 0.0)),
+        "win_rate": _safe_float(stats["Win Rate [%]"]),
+        "avg_winning_trade": _safe_float(stats.get("Avg Winning Trade [%]", 0.0)),
+        "avg_losing_trade": _safe_float(stats.get("Avg Losing Trade [%]", 0.0)),
+        "profit_factor": _safe_float(stats.get("Profit Factor", 0.0)),
+        "total_trades": int(_safe_float(stats["Total Trades"])),
+        "years": years,
+    }
+
+
+def _build_chart_data(
+    portfolio,
+    price: Dict[str, pd.Series],
+    indicator_values: Dict[str, Dict[str, pd.Series]],
+    entries: pd.Series,
+    exits: pd.Series,
+) -> dict:
+    equity = portfolio.value()
+    chart = {
+        "dates": equity.index.strftime("%Y-%m-%d").tolist(),
+        "equity": equity.tolist(),
+        "drawdown": (portfolio.drawdown() * 100).tolist(),
+        "close": price["Close"].tolist(),
+        "indicators": {
+            f"{ind_id}.{output}" if len(outputs) > 1 else ind_id: series.tolist()
+            for ind_id, outputs in indicator_values.items()
+            for output, series in outputs.items()
+        },
+        "signals": {
+            "Entries": entries.astype(int).tolist(),
+            "Exits": exits.astype(int).tolist(),
+        },
+    }
+    return chart
+
+
+def run_backtest_spec(spec: StrategySpec) -> dict:
+    """Execute a validated strategy spec. Returns metrics + chart data,
+    or an `error` key with a human-readable message."""
+    try:
+        price = fetch_price_data(spec.ticker, spec.start_date, spec.end_date)
+        indicator_values = compute_indicators(price, spec.indicators)
+        indicator_types = {ind.id: ind.type for ind in spec.indicators}
+
+        entries = evaluate_condition(spec.entry, price, indicator_values, indicator_types)
+        if spec.exit is not None:
+            exits = evaluate_condition(spec.exit, price, indicator_values, indicator_types)
+        else:
+            exits = pd.Series(False, index=price["Close"].index)
+
+        portfolio = vbt.Portfolio.from_signals(
+            close=price["Close"],
+            entries=entries.fillna(False),
+            exits=exits.fillna(False),
+            init_cash=spec.initial_cash,
+            fees=spec.fees,
+            sl_stop=spec.stop_loss,
+            tp_stop=spec.take_profit,
+            freq="D",
+        )
+
+        return {
+            "metrics": _build_metrics(portfolio, price["Close"]),
+            "chart_data": _build_chart_data(portfolio, price, indicator_values, entries, exits),
+            "strategy": spec.model_dump(exclude_none=True),
+        }
+    except Exception as e:  # surface a clean message rather than a traceback
+        print(f"[ERROR] Backtest failed: {e}")
+        return {"error": str(e), "metrics": None, "chart_data": None}
+
+
+# ---------------------------------------------------------------------------
+# Legacy named-strategy support for the /backtest endpoint: builds a
+# StrategySpec so both endpoints share one execution path.
+# ---------------------------------------------------------------------------
+
+def _legacy_spec(ticker, strategy, start_date, end_date, initial_cash, fees, **params) -> StrategySpec:
+    def sma_operand(ind_id):
+        return Operand(kind="indicator", indicator_id=ind_id, output="ma")
+
+    if strategy == "RSI":
+        window = params.get("rsi_period", 14)
+        rsi = Operand(kind="indicator", indicator_id="rsi", output="rsi")
+        return StrategySpec(
+            ticker=ticker, start_date=start_date, end_date=end_date,
+            initial_cash=initial_cash, fees=fees,
+            indicators=[Indicator(id="rsi", type="RSI", window=window)],
+            entry=Condition(op="lt", left=rsi,
+                            right=Operand(kind="constant", value=params.get("rsi_oversold", 30))),
+            exit=Condition(op="gt", left=rsi,
+                           right=Operand(kind="constant", value=params.get("rsi_overbought", 70))),
+        )
+
+    # Default: SMA crossover
+    fast, slow = params.get("sma_fast", 5), params.get("sma_slow", 20)
+    return StrategySpec(
+        ticker=ticker, start_date=start_date, end_date=end_date,
+        initial_cash=initial_cash, fees=fees,
+        indicators=[
+            Indicator(id="sma_fast", type="SMA", window=fast),
+            Indicator(id="sma_slow", type="SMA", window=slow),
+        ],
+        entry=Condition(op="cross_above", left=sma_operand("sma_fast"), right=sma_operand("sma_slow")),
+        exit=Condition(op="cross_below", left=sma_operand("sma_fast"), right=sma_operand("sma_slow")),
+    )
+
+
+def run_backtest(ticker="SPY", strategy="SMA", start_date="2015-01-01", end_date=None,
+                 initial_cash=100_000, fees=0.001, **strategy_params) -> dict:
+    """Legacy entry point used by the /backtest endpoint."""
+    spec = _legacy_spec(ticker, strategy, start_date, end_date, initial_cash, fees, **strategy_params)
+    return run_backtest_spec(spec)

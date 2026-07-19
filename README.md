@@ -21,7 +21,7 @@ BacktestGPT transforms the complex process of backtesting trading strategies int
   - Win Rate & Profit Factor
   - Trade Statistics
 - **Interactive Visualizations**: View equity curves, drawdowns, price charts with indicators, and trade signals
-- **Flexible Strategy Building**: Support for custom entry/exit conditions with multiple operators
+- **Flexible Strategy Building**: Compound entry/exit conditions (AND/OR/NOT nesting), stop-loss/take-profit, custom date ranges, cash, and fees — all from natural language
 - **Production Ready**: Next.js frontend on Vercel, FastAPI backend on Render
 
 ## Tech Stack
@@ -117,6 +117,12 @@ The test suite covers the API surface, signal-rule evaluation on synthetic price
 "Test Tesla with RSI: buy when RSI goes below 30, sell when it goes above 70"
 ```
 
+**Compound Conditions, Stops & Custom Parameters**
+```
+"Buy NVDA when RSI(14) is under 35 AND the price is above the 200-day SMA.
+Sell when RSI goes over 70. Use a 5% stop loss, $50k starting cash, from 2018 onwards."
+```
+
 **Multi-step Conversation**
 ```
 User: "I want to test a strategy on Microsoft"
@@ -133,7 +139,7 @@ User: "Buy when the 20 crosses above the 50, sell when it crosses below"
 GET /health
 ```
 
-#### Traditional Backtest
+#### Preset Backtest
 ```
 POST /backtest
 Content-Type: application/json
@@ -141,12 +147,36 @@ Content-Type: application/json
 {
   "ticker": "SPY",
   "strategy": "SMA",
-  "start_date": "2010-01-01",
-  "end_date": "2025-01-01",
+  "start_date": "2015-01-01",
   "initial_cash": 100000,
   "fees": 0.001,
   "sma_fast": 50,
   "sma_slow": 200
+}
+```
+
+#### Strategy AST Backtest (no LLM)
+```
+POST /backtest_spec
+Content-Type: application/json
+
+{
+  "ticker": "AAPL",
+  "stop_loss": 0.05,
+  "indicators": [
+    {"id": "sma50", "type": "SMA", "window": 50},
+    {"id": "sma200", "type": "SMA", "window": 200}
+  ],
+  "entry": {
+    "op": "cross_above",
+    "left": {"kind": "indicator", "indicator_id": "sma50"},
+    "right": {"kind": "indicator", "indicator_id": "sma200"}
+  },
+  "exit": {
+    "op": "cross_below",
+    "left": {"kind": "indicator", "indicator_id": "sma50"},
+    "right": {"kind": "indicator", "indicator_id": "sma200"}
+  }
 }
 ```
 
@@ -171,13 +201,15 @@ Content-Type: application/json
 
 ## Supported Operators
 
-- `cross_above` - When first indicator crosses above second
-- `cross_below` - When first indicator crosses below second
-- `greater_than` / `gt` - Simple comparison
-- `less_than` / `lt` - Simple comparison
-- `equal_to` / `eq` - Equality check
-- `greater_than_or_equal` / `gte` - Greater than or equal
-- `less_than_or_equal` / `lte` - Less than or equal
+**Comparisons** (between indicator outputs, price columns, and constants):
+- `cross_above` / `cross_below` - Crossover detection (fires only on the crossing bar)
+- `gt` / `lt` / `gte` / `lte` - Threshold comparisons
+
+**Logical combinators** (arbitrarily nestable):
+- `and` / `or` / `not` - Compose comparisons into compound rules, e.g. "RSI under 30 **and** price above the 200-day SMA"
+
+**Risk controls** (separate from exit rules):
+- `stop_loss` / `take_profit` - Fractional stops applied by the portfolio simulator
 
 ## Project Structure
 
@@ -185,11 +217,9 @@ Content-Type: application/json
 backtestGPT/
 ├── backend/
 │   ├── main.py                 # FastAPI application & routes
-│   ├── backtest_loop.py        # Core backtesting logic with VectorBT
-│   ├── llm_decode.py           # Natural language processing & AI integration
-│   ├── indicators.json         # Indicator registry
-│   ├── operators.json          # Operator registry
-│   ├── basic_strategies.json   # Predefined strategy templates
+│   ├── schema.py               # Typed strategy AST (Pydantic) + LLM response schema
+│   ├── backtest_loop.py        # Backtest engine: AST evaluation with VectorBT
+│   ├── llm_decode.py           # NL agent: Gemini structured outputs + repair loop
 │   ├── requirements.txt        # Python dependencies
 │   └── requirements-dev.txt    # Dev/test dependencies
 ├── app/                        # Next.js frontend
@@ -199,32 +229,23 @@ backtestGPT/
 │   │       └── globals.css     # Global styles
 │   ├── package.json            # Node dependencies
 │   └── next.config.ts          # Next.js configuration
-├── tests/                      # Pytest suite (API, signals, conversation state)
+├── tests/                      # Pytest suite (schema, engine, agent, API)
 ├── render.yaml                 # Render deployment config for the backend API
 ├── .env.example                # Environment variable template
 └── README.md                   # This file
 ```
 
-## Key Features Explained
+## Architecture: How Natural Language Becomes a Backtest
 
-### Conversational AI
-The system uses Google Gemini to maintain conversation context and progressively build trading strategies. It intelligently tracks what information has been provided and asks targeted follow-up questions to complete the strategy definition.
+The NL→backtest pipeline is built on **schema-constrained LLM decoding into a typed strategy AST**:
 
-### Ticker Validation
-All ticker symbols are validated against yfinance to ensure data availability before running backtests. The system includes intelligent caching to avoid repeated API calls and can suggest alternative ticker symbols for common company names.
+1. **One structured Gemini call per turn.** The model receives the full conversation and a JSON Schema (generated from Pydantic models in `schema.py`) that Gemini enforces at decoding time — invalid tokens are eliminated as the response is generated, so the output always has the right shape. The model either asks one clarifying question or emits a complete strategy.
+2. **A recursive expression tree, not a flat rule format.** Entry/exit conditions are ASTs: comparison leaves (`cross_above`, `gt`, ...) composed by `and`/`or`/`not` nodes at any nesting depth. This is what makes compound strategies expressible.
+3. **Semantic validation + repair loop.** Pydantic validators check what schemas can't — that every indicator reference points to a declared indicator with a valid output, operator arity, unique ids. If validation fails, the errors are fed back to the model for one corrected attempt (per benchmark findings that error feedback dramatically improves LLM structured-generation success rates).
+4. **Deterministic execution.** The engine (`backtest_loop.py`) walks the validated tree into boolean signal series and hands them to VectorBT — no LLM output is ever interpreted or executed as code, so there's nothing to sandbox.
+5. **Stateless server.** Conversation state lives entirely in the chat history the frontend sends with each request — no server-side sessions to collide or expire.
 
-### Strategy Compatibility Checking
-Before running a backtest, the system validates that:
-- All indicators are supported
-- All operators are valid
-- The strategy structure is complete
-- The ticker has available data
-
-### Performance Optimization
-- Registry caching for faster indicator/operator lookups
-- Ticker validation caching to reduce API calls
-- Smart conversation summarization for long conversations
-- Efficient data handling with pandas and numpy
+Ticker symbols are additionally validated against yfinance (with per-process caching) before any backtest runs.
 
 ## Performance Metrics
 

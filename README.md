@@ -1,6 +1,6 @@
 # BacktestGPT
 
-**Describe a trading strategy in plain English → get a full backtest with performance metrics and charts.**
+**Describe your trading strategy in plain English, and get a full backtest with performance metrics and charts.**
 
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?logo=fastapi&logoColor=white)
@@ -9,15 +9,15 @@
 ![Tests](https://img.shields.io/badge/tests-34%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-> *"Buy Nvidia whenever it falls 2% in a day, take profit at 5%"* — that sentence is the entire input. BacktestGPT compiles it into a typed, validated strategy AST and executes it against real market data with VectorBT.
+> *"Buy Nvidia whenever it falls 2% in a day, take profit at 5%"* that sentence is the entire input. BacktestGPT compiles it into a typed, validated strategy abstract syntax tree (AST) and executes it against real market data using the VectorBT library.
 
 <!-- Screenshots: drop images in docs/screenshots/ and they'll render here -->
 ![Chat interface — describing a strategy conversationally](docs/screenshots/chat.png)
 ![Backtest results — equity curve, drawdown, and performance metrics](docs/screenshots/results.png)
 
-## The Interesting Part: Natural Language → Typed Strategy AST
+## Natural Language to Typed Strategy AST
 
-Most LLM-powered tools either parse free-text model output with regexes (fragile) or let the model write executable code (needs sandboxing). BacktestGPT takes a third path: **schema-constrained decoding into a domain-specific AST**.
+Most LLM powered backtestin tools either parse text out from models with regex, which is fragiled and limited. Others the model write executable code which is slwo and token inefficient. BacktestGPT takes a third path: **schema-constrained decoding into a domain specific AST**.
 
 ```mermaid
 flowchart LR

@@ -5,11 +5,17 @@ from pydantic import BaseModel
 from backend.backtest_loop import run_backtest
 from backend.llm_decode import decode_natural_language
 
-app = FastAPI()
+app = FastAPI(
+    title="BacktestGPT API",
+    description="Conversational AI-powered trading strategy backtesting",
+    version="1.0.0",
+)
+# Wildcard origins require credentials to be disabled per the CORS spec;
+# the API is token-free so no credentials are needed.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

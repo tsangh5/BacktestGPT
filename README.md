@@ -2,6 +2,8 @@
 
 A conversational AI-powered trading strategy backtesting platform that lets you describe trading strategies in natural language and get instant performance analysis.
 
+> **Live demo:** deploy in one click with the included [Render blueprint](#deployment) — see the [Deployment](#deployment) section.
+
 ## Overview
 
 BacktestGPT transforms the complex process of backtesting trading strategies into a simple conversation. Instead of writing code or configuring complex parameters, just describe your strategy naturally: "Buy Apple when the 50-day SMA crosses above the 200-day SMA" - and get comprehensive backtest results with performance metrics and visualizations.
@@ -64,8 +66,9 @@ cd backtestGPT
 # Install Python dependencies
 pip install -r backend/requirements.txt
 
-# Create .env file with your API key
-echo "GEMINI_API_KEY=your_api_key_here" > .env
+# Create .env file with your API key (never commit this file)
+cp .env.example .env
+# then edit .env and set GEMINI_API_KEY
 ```
 
 3. **Set up the frontend**
@@ -90,6 +93,15 @@ cd app
 npm run dev
 ```
 The frontend will be available at `http://localhost:3000`
+
+### Running Tests
+
+```bash
+pip install -r backend/requirements-dev.txt
+pytest tests/
+```
+
+The test suite covers the API surface, signal-rule evaluation on synthetic price data, and conversation-state management — no network or API key required.
 
 ## Usage
 
@@ -175,11 +187,11 @@ backtestGPT/
 │   ├── main.py                 # FastAPI application & routes
 │   ├── backtest_loop.py        # Core backtesting logic with VectorBT
 │   ├── llm_decode.py           # Natural language processing & AI integration
-│   ├── genai.py                # Gemini API client setup
 │   ├── indicators.json         # Indicator registry
 │   ├── operators.json          # Operator registry
 │   ├── basic_strategies.json   # Predefined strategy templates
-│   └── requirements.txt        # Python dependencies
+│   ├── requirements.txt        # Python dependencies
+│   └── requirements-dev.txt    # Dev/test dependencies
 ├── app/                        # Next.js frontend
 │   ├── src/
 │   │   └── app/
@@ -187,7 +199,9 @@ backtestGPT/
 │   │       └── globals.css     # Global styles
 │   ├── package.json            # Node dependencies
 │   └── next.config.ts          # Next.js configuration
-├── render.yaml                 # Render deployment configuration
+├── tests/                      # Pytest suite (API, signals, conversation state)
+├── render.yaml                 # Render deployment configuration (blueprint)
+├── .env.example                # Environment variable template
 └── README.md                   # This file
 ```
 
@@ -229,17 +243,24 @@ The backtester provides comprehensive performance analytics:
 
 ## Deployment
 
-The application is configured for deployment on Render using the included `render.yaml` file:
+The application deploys to [Render](https://render.com) as a two-service blueprint using the included `render.yaml`:
 
-1. Connect your GitHub repository to Render
-2. Add your `GEMINI_API_KEY` environment variable in the Render dashboard
-3. Render will automatically deploy both backend and frontend services
+1. Push this repository to GitHub
+2. In the Render dashboard, choose **New → Blueprint** and select the repository
+3. When prompted, set the `GEMINI_API_KEY` environment variable for the backend service (it is intentionally not stored in the repo)
+4. Render builds and deploys both services; the frontend automatically receives the backend's hostname via `NEXT_PUBLIC_API_URL`
 
 The deployment configuration includes:
-- Automatic health checks
-- Environment variable management
-- Build and start commands
-- Service linking for backend/frontend communication
+- Pinned Python (3.11) and Node (22) runtimes
+- Automatic health checks against `/health`
+- Service linking so the frontend discovers the backend URL at build time
+
+> **Note:** On Render's free plan, services spin down when idle — the first request after a quiet period can take ~1 minute while the service cold-starts.
+
+### Security
+
+- API keys are supplied via environment variables only; `.env` is git-ignored and `.env.example` documents what's needed.
+- The backend never exposes the Gemini key to the browser — all LLM calls happen server-side.
 
 ## Contributing
 

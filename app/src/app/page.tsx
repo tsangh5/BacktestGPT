@@ -91,48 +91,6 @@ const createPlaceholderChart = (label: string, color: string) => ({
   ],
 });
 
-const chartOptions = {
-  maintainAspectRatio: false,
-  plugins: {
-    legend: {
-      display: true,
-    },
-  },
-  scales: {
-    x: {
-      display: true,
-    },
-    y: {
-      display: true,
-    },
-  },
-};
-
-const placeholderChartOptions = {
-  ...chartOptions,
-  plugins: {
-    ...chartOptions.plugins,
-    tooltip: {
-      enabled: false,
-    },
-  },
-  scales: {
-    x: {
-      display: false,
-    },
-    y: {
-      display: false,
-    },
-  },
-  elements: {
-    line: {
-      borderWidth: 0,
-    },
-    point: {
-      radius: 0,
-    },
-  },
-};
 // Add these type guard functions
 const isConversationMessage = (obj: unknown): obj is ConversationMessage => {
   return (
@@ -187,6 +145,15 @@ const safelyExtractConversation = (conversation: unknown): ConversationData | nu
   console.warn('Unable to parse conversation data:', conversation);
   return null;
 };
+// Render's `fromService: host` injects a bare hostname, so a scheme must be
+// added or fetch() would treat the URL as a relative path.
+const getApiUrl = (): string => {
+  const raw = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (!raw) return 'http://localhost:8000';
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  return withScheme.replace(/\/+$/, '');
+};
+
 // Styles moved outside component (prevents recreation on every render)
 const styles = {
   positive: 'metric-positive',
@@ -243,9 +210,7 @@ export default function Home() {
       setNlInput(''); // Clear input immediately
       
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-        // const apiUrl = 'http://localhost:8000';
-        const res = await fetch(`${apiUrl}/natural_backtest`, {
+        const res = await fetch(`${getApiUrl()}/natural_backtest`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 

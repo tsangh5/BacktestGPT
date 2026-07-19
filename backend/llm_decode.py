@@ -437,23 +437,26 @@ def get_conversation_state(conversation_history):
 # Registry cache to avoid loading on every import
 _registries_cache = None
 
+# Resolve registry files relative to this module so imports work from any cwd
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def get_registries():
     """Load registries with caching to improve performance"""
     global _registries_cache
-    
+
     if _registries_cache is None:
         print("Loading registries...")
         # Note: Ticker registry removed - system now accepts any valid ticker format via is_valid_ticker_format()
-        
-        with open('backend/indicators.json') as f:
+
+        with open(os.path.join(_BACKEND_DIR, 'indicators.json')) as f:
             indicators_registry = json.load(f)['indicators']
         print("Indicators loaded:", list(indicators_registry.keys()))
-        
-        with open('backend/operators.json') as f:
+
+        with open(os.path.join(_BACKEND_DIR, 'operators.json')) as f:
             operators_registry = json.load(f)['operators']
         print("Operators loaded:", {k: v for k, v in operators_registry.items()})
-        
-        with open('backend/basic_strategies.json') as f:
+
+        with open(os.path.join(_BACKEND_DIR, 'basic_strategies.json')) as f:
             strategies_registry = json.load(f)['strategies']
         print("Strategies loaded:", list(strategies_registry.keys()))
         

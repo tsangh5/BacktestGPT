@@ -1,5 +1,5 @@
+# Backend API only - the Next.js frontend is deployed on Vercel (see README)
 services:
-  # Backend API Service
   - type: web
     name: backtestgpt-backend
     runtime: python
@@ -12,20 +12,3 @@ services:
         value: 3.11.9
       - key: GEMINI_API_KEY
         sync: false # Set in the Render dashboard - never commit this
-
-  # Frontend Service
-  - type: web
-    name: backtestgpt-frontend
-    runtime: node
-    plan: free
-    buildCommand: cd app && npm ci && npm run build
-    startCommand: cd app && npm start
-    envVars:
-      - key: NODE_VERSION
-        value: 22.12.0
-      # Bare hostname of the backend; the frontend prepends https://
-      - key: NEXT_PUBLIC_API_URL
-        fromService:
-          type: web
-          name: backtestgpt-backend
-          property: host

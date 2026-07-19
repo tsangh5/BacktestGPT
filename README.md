@@ -2,7 +2,7 @@
 
 A conversational AI-powered trading strategy backtesting platform that lets you describe trading strategies in natural language and get instant performance analysis.
 
-> **Live demo:** deploy in one click with the included [Render blueprint](#deployment) — see the [Deployment](#deployment) section.
+> **Live demo:** frontend on Vercel, API on Render — see the [Deployment](#deployment) section to run your own.
 
 ## Overview
 
@@ -22,7 +22,7 @@ BacktestGPT transforms the complex process of backtesting trading strategies int
   - Trade Statistics
 - **Interactive Visualizations**: View equity curves, drawdowns, price charts with indicators, and trade signals
 - **Flexible Strategy Building**: Support for custom entry/exit conditions with multiple operators
-- **Production Ready**: Deployed on Render with FastAPI backend and Next.js frontend
+- **Production Ready**: Next.js frontend on Vercel, FastAPI backend on Render
 
 ## Tech Stack
 
@@ -41,7 +41,7 @@ BacktestGPT transforms the complex process of backtesting trading strategies int
 - **Font**: Geist
 
 ### Infrastructure
-- **Hosting**: Render
+- **Hosting**: Vercel (frontend) + Render (backend API)
 - **API**: RESTful FastAPI endpoints
 - **Deployment**: Automated via render.yaml
 
@@ -200,7 +200,7 @@ backtestGPT/
 │   ├── package.json            # Node dependencies
 │   └── next.config.ts          # Next.js configuration
 ├── tests/                      # Pytest suite (API, signals, conversation state)
-├── render.yaml                 # Render deployment configuration (blueprint)
+├── render.yaml                 # Render deployment config for the backend API
 ├── .env.example                # Environment variable template
 └── README.md                   # This file
 ```
@@ -243,19 +243,21 @@ The backtester provides comprehensive performance analytics:
 
 ## Deployment
 
-The application deploys to [Render](https://render.com) as a two-service blueprint using the included `render.yaml`:
+The frontend deploys on [Vercel](https://vercel.com) and the FastAPI backend on [Render](https://render.com).
 
-1. Push this repository to GitHub
-2. In the Render dashboard, choose **New → Blueprint** and select the repository
-3. When prompted, set the `GEMINI_API_KEY` environment variable for the backend service (it is intentionally not stored in the repo)
-4. Render builds and deploys both services; the frontend automatically receives the backend's hostname via `NEXT_PUBLIC_API_URL`
+### Backend (Render)
 
-The deployment configuration includes:
-- Pinned Python (3.11) and Node (22) runtimes
-- Automatic health checks against `/health`
-- Service linking so the frontend discovers the backend URL at build time
+1. In the Render dashboard, choose **New → Blueprint** and select this repository — the included `render.yaml` configures the service
+2. When prompted, set the `GEMINI_API_KEY` environment variable (it is intentionally not stored in the repo)
+3. Render builds and deploys with a pinned Python 3.11 runtime and health checks against `/health`
 
 > **Note:** On Render's free plan, services spin down when idle — the first request after a quiet period can take ~1 minute while the service cold-starts.
+
+### Frontend (Vercel)
+
+1. Import the repository in Vercel and set **Root Directory** to `app`
+2. Add an environment variable `NEXT_PUBLIC_API_URL` pointing at the Render backend (e.g. `https://backtestgpt-backend.onrender.com` — a bare hostname also works, `https://` is added automatically)
+3. Deploy — Vercel auto-detects Next.js and rebuilds on every push
 
 ### Security
 

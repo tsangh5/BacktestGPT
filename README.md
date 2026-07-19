@@ -17,7 +17,7 @@
 
 ## Natural Language to Typed Strategy AST
 
-Most LLM powered backtestin tools either parse text out from models with regex, which is fragiled and limited. Others the model write executable code which is slwo and token inefficient. BacktestGPT takes a third path: **schema-constrained decoding into a domain specific AST**.
+Most LLM powered backtesting tools either parse text out from models with regex, which is fragile and limited. Others the model write executable code which is slow and token inefficient. BacktestGPT takes a third path: **schema-constrained decoding into a domain specific AST**.
 
 ```mermaid
 flowchart LR
@@ -33,7 +33,7 @@ flowchart LR
     RES --> FE
 ```
 
-**One structured LLM call per turn.** The model sees the whole conversation and a JSON Schema generated from Pydantic models. Gemini's constrained decoding eliminates schema-invalid tokens *while the response is generated* — "the model returned prose instead of JSON" is structurally impossible. The model either asks one clarifying question or emits a complete strategy.
+**One structured LLM call per turn.** The model sees the whole conversation and a JSON Schema generated from Pydantic models. Gemini's constrained decoding eliminates schema-invalid tokens *while the response is generated*. This ensures that model either asks one clarifying question or emits a complete strategy in the desired JSON format.
 
 **A recursive expression language, not a rigid template.** Conditions are trees: comparison leaves (`cross_above`, `lte`, ...) composed by `and`/`or`/`not` at any depth. Operands are themselves recursive — indicator outputs, price columns, constants, transforms (`pct_change`, `rolling_max`, `shift`, ...), and arithmetic over other operands. That's how *"price at least 10% below its 52-week high on double average volume"* stays expressible without a single line of generated code.
 
@@ -140,16 +140,11 @@ pytest tests/
 └── render.yaml            # Backend deploy config (frontend deploys on Vercel)
 ```
 
-## Deployment
-
-Frontend: import in [Vercel](https://vercel.com) with root directory `app`, set `NEXT_PUBLIC_API_URL` to the backend URL.
-Backend: deploy the `render.yaml` blueprint on [Render](https://render.com), set `GEMINI_API_KEY` in the dashboard. Keys are environment-only — `.env` is git-ignored and all LLM calls happen server-side.
-
 ## Roadmap
 
-- **Translation eval harness** — golden dataset of prompt→AST pairs scored in CI, so prompt changes are measured, not vibes
-- **Provider-agnostic LLM layer** — Gemini / Groq / local models behind one strict-schema interface
-- **Overfitting guards** — train/test date splits and walk-forward validation surfaced in results
+- **Translation eval harness** - dataset of prompt/AST pairs scored in CI, so prompt changes are measured
+- **Provider-agnostic LLM layer** - Gemini / Groq / local models behind one strict-schema interface
+- **Overfitting guards** - train/test date splits and walk-forward validation surfaced in results
 - **Parameter sweeps** — vectorized grid search over indicator windows with heatmap visualization
 - **Agentic code-gen mode** — sandboxed generated-code path for strategies beyond the AST vocabulary
 

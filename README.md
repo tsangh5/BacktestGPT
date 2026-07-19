@@ -123,6 +123,12 @@ The test suite covers the API surface, signal-rule evaluation on synthetic price
 Sell when RSI goes over 70. Use a 5% stop loss, $50k starting cash, from 2018 onwards."
 ```
 
+**Price-Behavior Strategies (no named indicator needed)**
+```
+"Buy Nvidia whenever it falls 2% in a day, take profit at 5%"
+"Buy Apple when it's at least 10% below its 52-week high and volume is twice the 20-day average"
+```
+
 **Multi-step Conversation**
 ```
 User: "I want to test a strategy on Microsoft"
@@ -201,9 +207,16 @@ Content-Type: application/json
 
 ## Supported Operators
 
-**Comparisons** (between indicator outputs, price columns, and constants):
+**Comparisons** (between any two value expressions):
 - `cross_above` / `cross_below` - Crossover detection (fires only on the crossing bar)
 - `gt` / `lt` / `gte` / `lte` - Threshold comparisons
+
+**Value expressions** (recursive — each side of a comparison can be):
+- Indicator outputs, raw price columns (`Close`, `Open`, `High`, `Low`, `Volume`), or constants
+- Transforms of any expression: `pct_change`, `shift`, `rolling_max`, `rolling_min`, `rolling_mean`, `rolling_std`, `abs`
+- Arithmetic between expressions: `add` / `sub` / `mul` / `div`
+
+This is what makes open-ended strategies like *"buy NVDA whenever it drops 2% in a day"* or *"buy when price is 10% below its 52-week high on double average volume"* expressible without any named indicator.
 
 **Logical combinators** (arbitrarily nestable):
 - `and` / `or` / `not` - Compose comparisons into compound rules, e.g. "RSI under 30 **and** price above the 200-day SMA"

@@ -48,10 +48,27 @@ How to build the spec:
   cross_below) compare two operands; and/or/not combine sub-conditions, so
   compound rules like "RSI below 30 AND price above the 200-day SMA" become
   {op: "and", conditions: [...]}.
-- Operands: {kind: "indicator", indicator_id, output} for indicator values,
-  {kind: "price", column} for raw prices, {kind: "constant", value} for
-  numbers. Indicator outputs: SMA/EMA -> ma; RSI -> rsi; BB -> middle, upper,
-  lower; MACD -> macd, signal, hist.
+- Operands are recursive value expressions:
+  * {kind: "indicator", indicator_id, output} for indicator values.
+    Outputs: SMA/EMA -> ma; RSI -> rsi; BB -> middle, upper, lower;
+    MACD -> macd, signal, hist.
+  * {kind: "price", column} for raw prices; {kind: "constant", value} for numbers.
+  * {kind: "transform", transform, operand, periods?, window?} derives a new
+    series: pct_change (fractional change over `periods` bars, default 1),
+    shift (value `periods` bars ago), rolling_max / rolling_min /
+    rolling_mean / rolling_std (over `window` bars), abs.
+  * {kind: "math", op: add|sub|mul|div, left, right} for arithmetic between
+    expressions.
+- Use transforms for anything not covered by a named indicator. Examples:
+  * "falls 2% in a day" -> pct_change(Close, 1) lte -0.02  (percentages are
+    fractions: 2% -> 0.02; "falls"/"drops" are negative changes)
+  * "10% below its 52-week high" ->
+    Close lte mul(rolling_max(Close, 252), 0.9)   (252 trading days/year, 21/month)
+  * "volume is twice its 20-day average" ->
+    Volume gte mul(rolling_mean(Volume, 20), 2)
+  * "gap up 1% at the open" -> Open gte mul(shift(Close, 1), 1.01)
+  * "down 3 days in a row" -> and: [Close lt shift(Close,1),
+    shift(Close,1) lt shift(Close,2), shift(Close,2) lt shift(Close,3)]
 - "Golden cross" = 50-day SMA cross_above 200-day SMA; "death cross" is the
   reverse. "MACD crosses above its signal line" compares outputs macd and
   signal of one MACD indicator.
@@ -59,6 +76,14 @@ How to build the spec:
   (5% -> 0.05), not as exit conditions.
 - Map company names to tickers (Apple -> AAPL, Microsoft -> MSFT, etc.).
 - If the user corrects an earlier detail, use the corrected value.
+
+If the user asks for something these building blocks cannot express — news or
+sentiment triggers, earnings dates, fundamentals (P/E, revenue), intraday
+timing, options, shorting, or multi-asset portfolios — do NOT approximate it
+with something else. Set strategy to null and briefly say that part isn't
+supported, naming the closest thing you CAN do (price/volume behavior,
+technical indicators, stops). Never silently substitute a different strategy
+than the one the user asked for.
 
 Only emit a strategy when you are confident it reflects the user's intent.
 """

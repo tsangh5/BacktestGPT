@@ -108,6 +108,50 @@ def test_operand_kind_field_requirements():
         Operand.model_validate({"kind": "constant"})  # missing value
 
 
+def test_transform_operand_validation():
+    close = {"kind": "price", "column": "Close"}
+    # Valid: pct_change with default periods
+    Operand.model_validate({"kind": "transform", "transform": "pct_change", "operand": close})
+    # Rolling transforms require a window
+    with pytest.raises(ValidationError, match="requires window"):
+        Operand.model_validate({"kind": "transform", "transform": "rolling_max", "operand": close})
+    # Transform requires an input expression
+    with pytest.raises(ValidationError, match="requires transform and operand"):
+        Operand.model_validate({"kind": "transform", "transform": "pct_change"})
+
+
+def test_math_operand_validation():
+    close = {"kind": "price", "column": "Close"}
+    Operand.model_validate({"kind": "math", "op": "mul", "left": close,
+                            "right": {"kind": "constant", "value": 0.9}})
+    with pytest.raises(ValidationError, match="requires op, left, and right"):
+        Operand.model_validate({"kind": "math", "op": "mul", "left": close})
+
+
+def test_indicator_reference_checked_inside_nested_expression():
+    """References must be validated even when buried in transform/math nodes."""
+    spec = sma_cross_spec(
+        entry={
+            "op": "lte",
+            "left": {"kind": "price", "column": "Close"},
+            "right": {
+                "kind": "math",
+                "op": "mul",
+                "left": {
+                    "kind": "transform",
+                    "transform": "rolling_max",
+                    "window": 252,
+                    "operand": {"kind": "indicator", "indicator_id": "ghost"},
+                },
+                "right": {"kind": "constant", "value": 0.9},
+            },
+        },
+        exit=None,
+    )
+    with pytest.raises(ValidationError, match="undeclared indicator 'ghost'"):
+        StrategySpec.model_validate(spec)
+
+
 def test_agent_response_clarification_turn():
     parsed = AgentResponse.model_validate_json(
         '{"message": "Which ticker would you like to trade?", "strategy": null}'

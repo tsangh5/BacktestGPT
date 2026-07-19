@@ -68,10 +68,40 @@ def resolve_operand(
         return operand.value
     if operand.kind == "price":
         return price[operand.column]
-    outputs = indicator_values[operand.indicator_id]
-    # Default to the indicator's primary output when unspecified
-    output = operand.output or INDICATOR_OUTPUTS[indicator_types[operand.indicator_id]][0]
-    return outputs[output]
+    if operand.kind == "indicator":
+        outputs = indicator_values[operand.indicator_id]
+        # Default to the indicator's primary output when unspecified
+        output = operand.output or INDICATOR_OUTPUTS[indicator_types[operand.indicator_id]][0]
+        return outputs[output]
+
+    if operand.kind == "transform":
+        inner = resolve_operand(operand.operand, price, indicator_values, indicator_types)
+        if not isinstance(inner, pd.Series):
+            raise ValueError(f"transform '{operand.transform}' requires a series input")
+        if operand.transform == "pct_change":
+            return inner.pct_change(operand.periods or 1)
+        if operand.transform == "shift":
+            return inner.shift(operand.periods or 1)
+        if operand.transform == "rolling_max":
+            return inner.rolling(operand.window).max()
+        if operand.transform == "rolling_min":
+            return inner.rolling(operand.window).min()
+        if operand.transform == "rolling_mean":
+            return inner.rolling(operand.window).mean()
+        if operand.transform == "rolling_std":
+            return inner.rolling(operand.window).std()
+        return inner.abs()
+
+    # kind == "math": elementwise arithmetic; pandas broadcasts scalars
+    left = resolve_operand(operand.left, price, indicator_values, indicator_types)
+    right = resolve_operand(operand.right, price, indicator_values, indicator_types)
+    if operand.op == "add":
+        return left + right
+    if operand.op == "sub":
+        return left - right
+    if operand.op == "mul":
+        return left * right
+    return left / right
 
 
 def evaluate_condition(

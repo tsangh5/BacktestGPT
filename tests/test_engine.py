@@ -126,6 +126,84 @@ def test_full_spec_run_with_patched_fetch(price, monkeypatch):
     assert sum(chart["signals"]["Entries"]) >= 1
 
 
+def test_pct_change_entry_buy_the_dip(price, monkeypatch):
+    """'Buy whenever it falls 2% in a day' — no named indicators at all."""
+    monkeypatch.setattr(backtest_loop, "fetch_price_data", lambda *a, **k: price)
+    daily_return = Operand(
+        kind="transform",
+        transform="pct_change",
+        operand=Operand(kind="price", column="Close"),
+        periods=1,
+    )
+    spec = StrategySpec(
+        ticker="NVDA",
+        take_profit=0.05,
+        entry=Condition(op="lte", left=daily_return, right=Operand(kind="constant", value=-0.02)),
+    )
+    result = run_backtest_spec(spec)
+    assert "error" not in result
+    # Signal must match the raw pandas computation exactly
+    expected = (price["Close"].pct_change(1) <= -0.02).sum()
+    assert sum(result["chart_data"]["signals"]["Entries"]) == expected
+    assert expected > 0
+
+
+def test_rolling_max_and_math_below_high(price):
+    """'Price at least 5% below its 60-day high' via rolling_max + mul."""
+    cond = Condition(
+        op="lte",
+        left=Operand(kind="price", column="Close"),
+        right=Operand(
+            kind="math",
+            op="mul",
+            left=Operand(
+                kind="transform",
+                transform="rolling_max",
+                operand=Operand(kind="price", column="Close"),
+                window=60,
+            ),
+            right=Operand(kind="constant", value=0.95),
+        ),
+    )
+    signal = evaluate_condition(cond, price, {}, {}).fillna(False)
+    expected = (price["Close"] <= price["Close"].rolling(60).max() * 0.95).fillna(False)
+    assert signal.equals(expected)
+
+
+def test_volume_vs_rolling_mean(price):
+    """'Volume twice its 20-day average' — constant volume, so never true."""
+    cond = Condition(
+        op="gte",
+        left=Operand(kind="price", column="Volume"),
+        right=Operand(
+            kind="math",
+            op="mul",
+            left=Operand(
+                kind="transform",
+                transform="rolling_mean",
+                operand=Operand(kind="price", column="Volume"),
+                window=20,
+            ),
+            right=Operand(kind="constant", value=2),
+        ),
+    )
+    assert not evaluate_condition(cond, price, {}, {}).fillna(False).any()
+
+
+def test_transform_of_indicator_output(price):
+    """Transforms compose with indicators: 'RSI rising vs 5 days ago'."""
+    values = compute_indicators(price, [Indicator(id="rsi14", type="RSI", window=14)])
+    rsi = Operand(kind="indicator", indicator_id="rsi14")
+    cond = Condition(
+        op="gt",
+        left=rsi,
+        right=Operand(kind="transform", transform="shift", operand=rsi, periods=5),
+    )
+    signal = evaluate_condition(cond, price, values, {"rsi14": "RSI"}).fillna(False)
+    series = values["rsi14"]["rsi"]
+    assert signal.equals((series > series.shift(5)).fillna(False))
+
+
 def test_spec_run_surfaces_fetch_error(monkeypatch):
     def boom(*a, **k):
         raise ValueError("No price data returned for 'NOPE'")

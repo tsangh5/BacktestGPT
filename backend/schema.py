@@ -28,10 +28,18 @@ INDICATOR_OUTPUTS = {
 }
 
 
-class Operand(BaseModel):
-    """One side of a comparison: an indicator output, a price column, or a number."""
+TRANSFORMS = ("pct_change", "shift", "rolling_max", "rolling_min", "rolling_mean", "rolling_std", "abs")
+ROLLING_TRANSFORMS = ("rolling_max", "rolling_min", "rolling_mean", "rolling_std")
+MATH_OPS = ("add", "sub", "mul", "div")
 
-    kind: Literal["indicator", "price", "constant"]
+
+class Operand(BaseModel):
+    """A value expression: an indicator output, a price column, a number, a
+    transform of another expression, or arithmetic between two expressions.
+    Recursive, so derived series like "2% below the 52-week high" are
+    expressible: mul(rolling_max(Close, 252), 0.98)."""
+
+    kind: Literal["indicator", "price", "constant", "transform", "math"]
     indicator_id: Optional[str] = Field(
         None, description="id of a declared indicator (kind=indicator)"
     )
@@ -41,6 +49,21 @@ class Operand(BaseModel):
     )
     column: Optional[PriceColumn] = Field(None, description="price column (kind=price)")
     value: Optional[float] = Field(None, description="numeric constant (kind=constant)")
+    transform: Optional[Literal[
+        "pct_change", "shift", "rolling_max", "rolling_min", "rolling_mean", "rolling_std", "abs"
+    ]] = Field(None, description="transform to apply to `operand` (kind=transform)")
+    operand: Optional["Operand"] = Field(
+        None, description="input expression for a transform (kind=transform)"
+    )
+    periods: Optional[int] = Field(
+        None, ge=1, description="lookback for pct_change/shift (default 1)"
+    )
+    window: Optional[int] = Field(None, ge=1, description="window for rolling_* transforms")
+    op: Optional[Literal["add", "sub", "mul", "div"]] = Field(
+        None, description="arithmetic operator (kind=math)"
+    )
+    left: Optional["Operand"] = Field(None, description="left expression (kind=math)")
+    right: Optional["Operand"] = Field(None, description="right expression (kind=math)")
 
     @model_validator(mode="after")
     def _check_kind_fields(self) -> "Operand":
@@ -50,6 +73,14 @@ class Operand(BaseModel):
             raise ValueError("operand of kind 'price' requires column")
         if self.kind == "constant" and self.value is None:
             raise ValueError("operand of kind 'constant' requires value")
+        if self.kind == "transform":
+            if not self.transform or self.operand is None:
+                raise ValueError("operand of kind 'transform' requires transform and operand")
+            if self.transform in ROLLING_TRANSFORMS and not self.window:
+                raise ValueError(f"transform '{self.transform}' requires window")
+        if self.kind == "math":
+            if not self.op or self.left is None or self.right is None:
+                raise ValueError("operand of kind 'math' requires op, left, and right")
         return self
 
 
@@ -116,10 +147,10 @@ class StrategySpec(BaseModel):
             raise ValueError("indicator ids must be unique")
         by_id = {ind.id: ind for ind in self.indicators}
 
-        def check_condition(cond: Condition) -> None:
-            for operand in (cond.left, cond.right):
-                if operand is None or operand.kind != "indicator":
-                    continue
+        def check_operand(operand: Optional[Operand]) -> None:
+            if operand is None:
+                return
+            if operand.kind == "indicator":
                 ind = by_id.get(operand.indicator_id)
                 if ind is None:
                     raise ValueError(
@@ -131,6 +162,13 @@ class StrategySpec(BaseModel):
                         f"indicator '{ind.id}' ({ind.type}) has no output "
                         f"'{operand.output}'; valid outputs: {', '.join(valid_outputs)}"
                     )
+            check_operand(operand.operand)
+            check_operand(operand.left)
+            check_operand(operand.right)
+
+        def check_condition(cond: Condition) -> None:
+            check_operand(cond.left)
+            check_operand(cond.right)
             for sub in cond.conditions or []:
                 check_condition(sub)
 

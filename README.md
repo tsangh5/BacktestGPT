@@ -1,323 +1,162 @@
 # BacktestGPT
 
-A conversational AI-powered trading strategy backtesting platform that lets you describe trading strategies in natural language and get instant performance analysis.
+**Describe a trading strategy in plain English → get a full backtest with performance metrics and charts.**
 
-> **Live demo:** frontend on Vercel, API on Render — see the [Deployment](#deployment) section to run your own.
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?logo=fastapi&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-34%20passing-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
-## Overview
+> *"Buy Nvidia whenever it falls 2% in a day, take profit at 5%"* — that sentence is the entire input. BacktestGPT compiles it into a typed, validated strategy AST and executes it against real market data with VectorBT.
 
-BacktestGPT transforms the complex process of backtesting trading strategies into a simple conversation. Instead of writing code or configuring complex parameters, just describe your strategy naturally: "Buy Apple when the 50-day SMA crosses above the 200-day SMA" - and get comprehensive backtest results with performance metrics and visualizations.
+<!-- Screenshots: drop images in docs/screenshots/ and they'll render here -->
+![Chat interface — describing a strategy conversationally](docs/screenshots/chat.png)
+![Backtest results — equity curve, drawdown, and performance metrics](docs/screenshots/results.png)
 
-## Features
+## The Interesting Part: Natural Language → Typed Strategy AST
 
-- **Natural Language Interface**: Describe trading strategies in plain English
-- **Conversational AI**: Build complex strategies through guided conversations
-- **Real-time Validation**: Automatic ticker symbol validation using yfinance
-- **Technical Indicators**: Support for SMA, RSI, Bollinger Bands, EMA, MACD, and more
-- **Comprehensive Metrics**: Get detailed performance analytics including:
-  - Total Return & CAGR
-  - Sharpe & Sortino Ratios
-  - Max Drawdown
-  - Win Rate & Profit Factor
-  - Trade Statistics
-- **Interactive Visualizations**: View equity curves, drawdowns, price charts with indicators, and trade signals
-- **Flexible Strategy Building**: Compound entry/exit conditions (AND/OR/NOT nesting), stop-loss/take-profit, custom date ranges, cash, and fees — all from natural language
-- **Production Ready**: Next.js frontend on Vercel, FastAPI backend on Render
+Most LLM-powered tools either parse free-text model output with regexes (fragile) or let the model write executable code (needs sandboxing). BacktestGPT takes a third path: **schema-constrained decoding into a domain-specific AST**.
 
-## Tech Stack
-
-### Backend
-- **Framework**: FastAPI
-- **Backtesting Engine**: VectorBT
-- **AI Model**: Google Gemini 2.5 Flash
-- **Data Source**: yfinance
-- **Technical Analysis**: pandas, numpy, vectorbt
-
-### Frontend
-- **Framework**: Next.js 15 (React 19)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Charts**: Chart.js with react-chartjs-2
-- **Font**: Geist
-
-### Infrastructure
-- **Hosting**: Vercel (frontend) + Render (backend API)
-- **API**: RESTful FastAPI endpoints
-- **Deployment**: Automated via render.yaml
-
-## Getting Started
-
-### Prerequisites
-- Python 3.9+
-- Node.js 18+
-- npm or yarn
-- Google Gemini API key
-
-### Installation
-
-1. **Clone the repository**
-```bash
-git clone https://github.com/yourusername/backtestGPT.git
-cd backtestGPT
+```mermaid
+flowchart LR
+    U([User]) --> FE[Next.js chat UI]
+    FE -->|input + full history| API[FastAPI]
+    API --> LLM["Gemini 2.5 Flash<br/>(constrained decoding<br/>against JSON Schema)"]
+    LLM -->|AgentResponse| VAL{Pydantic<br/>semantic validation}
+    VAL -->|"validation errors<br/>(repair loop, 1 retry)"| LLM
+    VAL -->|clarifying question| FE
+    VAL -->|StrategySpec AST| ENG[Recursive tree evaluator]
+    YF[(yfinance<br/>market data)] --> ENG
+    ENG -->|VectorBT portfolio simulation| RES[Metrics + chart series]
+    RES --> FE
 ```
 
-2. **Set up the backend**
+**One structured LLM call per turn.** The model sees the whole conversation and a JSON Schema generated from Pydantic models. Gemini's constrained decoding eliminates schema-invalid tokens *while the response is generated* — "the model returned prose instead of JSON" is structurally impossible. The model either asks one clarifying question or emits a complete strategy.
+
+**A recursive expression language, not a rigid template.** Conditions are trees: comparison leaves (`cross_above`, `lte`, ...) composed by `and`/`or`/`not` at any depth. Operands are themselves recursive — indicator outputs, price columns, constants, transforms (`pct_change`, `rolling_max`, `shift`, ...), and arithmetic over other operands. That's how *"price at least 10% below its 52-week high on double average volume"* stays expressible without a single line of generated code.
+
+The dip-buying example above compiles to:
+
+```json
+{
+  "ticker": "NVDA",
+  "take_profit": 0.05,
+  "indicators": [],
+  "entry": {
+    "op": "lte",
+    "left": {
+      "kind": "transform", "transform": "pct_change", "periods": 1,
+      "operand": { "kind": "price", "column": "Close" }
+    },
+    "right": { "kind": "constant", "value": -0.02 }
+  },
+  "exit": null
+}
+```
+
+**Semantic validation the schema can't express, with a repair loop.** Pydantic validators check that every indicator reference points to a declared indicator with a valid output, operator arity is correct, and ids are unique. On failure, the exact errors go back to the model for one corrected attempt — mirroring benchmark findings that error feedback lifts LLM structured-generation success rates from ~75% to ~95%+.
+
+**Deterministic, sandbox-free execution.** The engine walks the validated tree into boolean signal series and hands them to VectorBT. No LLM output is ever interpreted as code, so there is nothing to sandbox and results are exactly reproducible from the spec JSON.
+
+**Stateless server.** Conversation state lives entirely in the chat history the client sends — no sessions to collide, expire, or lose on redeploy.
+
+### Engineering Decisions
+
+| Decision | Alternative considered | Why this way |
+|---|---|---|
+| Constrained decoding into an AST | LLM writes Python, run in a sandbox | Benchmarks show ~70–76% single-shot correctness for generated backtest code; an AST is verifiable *before* execution and needs no sandbox |
+| Recursive expression schema | Flat `{op, args}` rule format | Flat formats can't express compound logic; recursion via JSON Schema `$ref` costs nothing extra |
+| Repair loop (1 retry with errors) | Fail on first invalid output | Error feedback is the cheapest reliability multiplier in structured generation |
+| Refuse inexpressible requests | Approximate with nearest supported strategy | Silently backtesting a *different* strategy than asked is the worst failure mode a finance tool can have |
+| Stateless API | Server-side conversation store | Free-tier dynos restart constantly; client-held history makes cold starts invisible |
+
+## Failure Handling
+
+Every layer degrades conversationally — the user never sees a stack trace:
+
+- **Ambiguous prompt** → the model returns no strategy and asks one targeted question, building on established context.
+- **Inexpressible request** (news sentiment, earnings dates, fundamentals) → the model says so explicitly and names the closest supported alternative; it is instructed never to substitute silently.
+- **Schema-invalid output** → repair loop with validation errors; after two failures, a friendly rephrase suggestion with a worked example.
+- **Unknown ticker** → validated against yfinance (cached) before any backtest runs.
+- **Empty data range / API overload** → clean conversational error with a suggested fix; transient 503/429s retry with backoff.
+
+## Strategy Vocabulary
+
+**Indicators** — SMA, EMA, RSI, Bollinger Bands, MACD (all parameterizable: windows, std-devs, fast/slow/signal periods)
+
+**Comparisons** — `cross_above`, `cross_below`, `gt`, `lt`, `gte`, `lte`
+**Combinators** — `and`, `or`, `not` (arbitrarily nested)
+**Transforms** — `pct_change`, `shift`, `rolling_max`, `rolling_min`, `rolling_mean`, `rolling_std`, `abs`
+**Arithmetic** — `add`, `sub`, `mul`, `div` between any expressions
+**Risk controls** — fractional `stop_loss` / `take_profit` applied by the portfolio simulator
+**Parameters** — date range, starting cash, fees — all settable from natural language
+
+**Metrics reported** — total return, CAGR, Sharpe, Sortino, max drawdown, win rate, profit factor, avg win/loss, trade count — plus equity-curve, drawdown, indicator, and signal series for charting.
+
+## API
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /natural_backtest` | Conversational NL backtesting (`{input, conversation_history}`) |
+| `POST /backtest_spec` | Run a strategy AST directly — no LLM involved |
+| `POST /backtest` | Preset strategies (SMA crossover, RSI) with simple params |
+| `GET /health` | Health check |
+
+Interactive OpenAPI docs at `/docs` when running.
+
+## Quickstart
+
 ```bash
-# Install Python dependencies
+# Backend (Python 3.11)
 pip install -r backend/requirements.txt
+cp .env.example .env          # add your Gemini API key (aistudio.google.com/apikey)
+uvicorn backend.main:app --reload          # http://localhost:8000
 
-# Create .env file with your API key (never commit this file)
-cp .env.example .env
-# then edit .env and set GEMINI_API_KEY
+# Frontend
+cd app && npm install && npm run dev       # http://localhost:3000
 ```
 
-3. **Set up the frontend**
-```bash
-cd app
-npm install
-```
-
-### Running Locally
-
-1. **Start the backend server**
-```bash
-# From the root directory
-uvicorn backend.main:app --reload
-```
-The API will be available at `http://localhost:8000`
-
-2. **Start the frontend development server**
-```bash
-# From the app directory
-cd app
-npm run dev
-```
-The frontend will be available at `http://localhost:3000`
-
-### Running Tests
+### Tests
 
 ```bash
 pip install -r backend/requirements-dev.txt
 pytest tests/
 ```
 
-The test suite covers the API surface, signal-rule evaluation on synthetic price data, and conversation-state management — no network or API key required.
-
-## Usage
-
-### Natural Language Examples
-
-**Simple Moving Average Strategy**
-```
-"Backtest Apple stock using a golden cross strategy - buy when 50-day SMA crosses above 200-day SMA, sell when it crosses below"
-```
-
-**RSI Strategy**
-```
-"Test Tesla with RSI: buy when RSI goes below 30, sell when it goes above 70"
-```
-
-**Compound Conditions, Stops & Custom Parameters**
-```
-"Buy NVDA when RSI(14) is under 35 AND the price is above the 200-day SMA.
-Sell when RSI goes over 70. Use a 5% stop loss, $50k starting cash, from 2018 onwards."
-```
-
-**Price-Behavior Strategies (no named indicator needed)**
-```
-"Buy Nvidia whenever it falls 2% in a day, take profit at 5%"
-"Buy Apple when it's at least 10% below its 52-week high and volume is twice the 20-day average"
-```
-
-**Multi-step Conversation**
-```
-User: "I want to test a strategy on Microsoft"
-BacktestGPT: "Great! What trading indicators would you like to use?"
-User: "Use a 20-day SMA and 50-day SMA"
-BacktestGPT: "Perfect! When should I buy and sell?"
-User: "Buy when the 20 crosses above the 50, sell when it crosses below"
-```
-
-### API Endpoints
-
-#### Health Check
-```
-GET /health
-```
-
-#### Preset Backtest
-```
-POST /backtest
-Content-Type: application/json
-
-{
-  "ticker": "SPY",
-  "strategy": "SMA",
-  "start_date": "2015-01-01",
-  "initial_cash": 100000,
-  "fees": 0.001,
-  "sma_fast": 50,
-  "sma_slow": 200
-}
-```
-
-#### Strategy AST Backtest (no LLM)
-```
-POST /backtest_spec
-Content-Type: application/json
-
-{
-  "ticker": "AAPL",
-  "stop_loss": 0.05,
-  "indicators": [
-    {"id": "sma50", "type": "SMA", "window": 50},
-    {"id": "sma200", "type": "SMA", "window": 200}
-  ],
-  "entry": {
-    "op": "cross_above",
-    "left": {"kind": "indicator", "indicator_id": "sma50"},
-    "right": {"kind": "indicator", "indicator_id": "sma200"}
-  },
-  "exit": {
-    "op": "cross_below",
-    "left": {"kind": "indicator", "indicator_id": "sma50"},
-    "right": {"kind": "indicator", "indicator_id": "sma200"}
-  }
-}
-```
-
-#### Natural Language Backtest
-```
-POST /natural_backtest
-Content-Type: application/json
-
-{
-  "input": "Backtest Apple with a 50/200 SMA crossover strategy",
-  "conversation_history": []
-}
-```
-
-## Supported Indicators
-
-- **SMA** (Simple Moving Average) - Trend following indicator
-- **RSI** (Relative Strength Index) - Momentum oscillator
-- **BB** (Bollinger Bands) - Volatility indicator
-- **EMA** (Exponential Moving Average) - Weighted moving average
-- **MACD** (Moving Average Convergence Divergence) - Trend and momentum
-
-## Supported Operators
-
-**Comparisons** (between any two value expressions):
-- `cross_above` / `cross_below` - Crossover detection (fires only on the crossing bar)
-- `gt` / `lt` / `gte` / `lte` - Threshold comparisons
-
-**Value expressions** (recursive — each side of a comparison can be):
-- Indicator outputs, raw price columns (`Close`, `Open`, `High`, `Low`, `Volume`), or constants
-- Transforms of any expression: `pct_change`, `shift`, `rolling_max`, `rolling_min`, `rolling_mean`, `rolling_std`, `abs`
-- Arithmetic between expressions: `add` / `sub` / `mul` / `div`
-
-This is what makes open-ended strategies like *"buy NVDA whenever it drops 2% in a day"* or *"buy when price is 10% below its 52-week high on double average volume"* expressible without any named indicator.
-
-**Logical combinators** (arbitrarily nestable):
-- `and` / `or` / `not` - Compose comparisons into compound rules, e.g. "RSI under 30 **and** price above the 200-day SMA"
-
-**Risk controls** (separate from exit rules):
-- `stop_loss` / `take_profit` - Fractional stops applied by the portfolio simulator
+34 tests cover schema semantics (reference resolution, operator arity, nested-expression validation), engine evaluation on synthetic price data (crossovers, compound conditions, transforms, full spec runs), and agent behavior against a mocked Gemini client (clarification turns, the repair loop, graceful give-up). No network or API key required.
 
 ## Project Structure
 
 ```
-backtestGPT/
 ├── backend/
-│   ├── main.py                 # FastAPI application & routes
-│   ├── schema.py               # Typed strategy AST (Pydantic) + LLM response schema
-│   ├── backtest_loop.py        # Backtest engine: AST evaluation with VectorBT
-│   ├── llm_decode.py           # NL agent: Gemini structured outputs + repair loop
-│   ├── requirements.txt        # Python dependencies
-│   └── requirements-dev.txt    # Dev/test dependencies
-├── app/                        # Next.js frontend
-│   ├── src/
-│   │   └── app/
-│   │       ├── page.tsx        # Main UI component
-│   │       └── globals.css     # Global styles
-│   ├── package.json            # Node dependencies
-│   └── next.config.ts          # Next.js configuration
-├── tests/                      # Pytest suite (schema, engine, agent, API)
-├── render.yaml                 # Render deployment config for the backend API
-├── .env.example                # Environment variable template
-└── README.md                   # This file
+│   ├── schema.py          # Typed strategy AST (Pydantic) — single source of truth
+│   ├── llm_decode.py      # NL agent: constrained decoding + repair loop
+│   ├── backtest_loop.py   # Engine: recursive AST evaluation with VectorBT
+│   └── main.py            # FastAPI routes
+├── app/                   # Next.js 15 / React 19 / TypeScript chat UI with Chart.js
+├── tests/                 # Pytest: schema, engine, agent, API
+└── render.yaml            # Backend deploy config (frontend deploys on Vercel)
 ```
-
-## Architecture: How Natural Language Becomes a Backtest
-
-The NL→backtest pipeline is built on **schema-constrained LLM decoding into a typed strategy AST**:
-
-1. **One structured Gemini call per turn.** The model receives the full conversation and a JSON Schema (generated from Pydantic models in `schema.py`) that Gemini enforces at decoding time — invalid tokens are eliminated as the response is generated, so the output always has the right shape. The model either asks one clarifying question or emits a complete strategy.
-2. **A recursive expression tree, not a flat rule format.** Entry/exit conditions are ASTs: comparison leaves (`cross_above`, `gt`, ...) composed by `and`/`or`/`not` nodes at any nesting depth. This is what makes compound strategies expressible.
-3. **Semantic validation + repair loop.** Pydantic validators check what schemas can't — that every indicator reference points to a declared indicator with a valid output, operator arity, unique ids. If validation fails, the errors are fed back to the model for one corrected attempt (per benchmark findings that error feedback dramatically improves LLM structured-generation success rates).
-4. **Deterministic execution.** The engine (`backtest_loop.py`) walks the validated tree into boolean signal series and hands them to VectorBT — no LLM output is ever interpreted or executed as code, so there's nothing to sandbox.
-5. **Stateless server.** Conversation state lives entirely in the chat history the frontend sends with each request — no server-side sessions to collide or expire.
-
-Ticker symbols are additionally validated against yfinance (with per-process caching) before any backtest runs.
-
-## Performance Metrics
-
-The backtester provides comprehensive performance analytics:
-
-- **Start/End Value** - Portfolio value at beginning and end
-- **Total Return** - Overall percentage return
-- **CAGR** - Compound Annual Growth Rate
-- **Max Drawdown** - Largest peak-to-trough decline
-- **Sharpe Ratio** - Risk-adjusted return metric
-- **Sortino Ratio** - Downside risk-adjusted return
-- **Win Rate** - Percentage of profitable trades
-- **Profit Factor** - Ratio of gross profit to gross loss
-- **Average Win/Loss** - Average size of winning vs losing trades
-- **Total Trades** - Number of trades executed
 
 ## Deployment
 
-The frontend deploys on [Vercel](https://vercel.com) and the FastAPI backend on [Render](https://render.com).
+Frontend: import in [Vercel](https://vercel.com) with root directory `app`, set `NEXT_PUBLIC_API_URL` to the backend URL.
+Backend: deploy the `render.yaml` blueprint on [Render](https://render.com), set `GEMINI_API_KEY` in the dashboard. Keys are environment-only — `.env` is git-ignored and all LLM calls happen server-side.
 
-### Backend (Render)
+## Roadmap
 
-1. In the Render dashboard, choose **New → Blueprint** and select this repository — the included `render.yaml` configures the service
-2. When prompted, set the `GEMINI_API_KEY` environment variable (it is intentionally not stored in the repo)
-3. Render builds and deploys with a pinned Python 3.11 runtime and health checks against `/health`
+- **Translation eval harness** — golden dataset of prompt→AST pairs scored in CI, so prompt changes are measured, not vibes
+- **Provider-agnostic LLM layer** — Gemini / Groq / local models behind one strict-schema interface
+- **Overfitting guards** — train/test date splits and walk-forward validation surfaced in results
+- **Parameter sweeps** — vectorized grid search over indicator windows with heatmap visualization
+- **Agentic code-gen mode** — sandboxed generated-code path for strategies beyond the AST vocabulary
 
-> **Note:** On Render's free plan, services spin down when idle — the first request after a quiet period can take ~1 minute while the service cold-starts.
+## Disclaimer
 
-### Frontend (Vercel)
-
-1. Import the repository in Vercel and set **Root Directory** to `app`
-2. Add an environment variable `NEXT_PUBLIC_API_URL` pointing at the Render backend (e.g. `https://backtestgpt-backend.onrender.com` — a bare hostname also works, `https://` is added automatically)
-3. Deploy — Vercel auto-detects Next.js and rebuilds on every push
-
-### Security
-
-- API keys are supplied via environment variables only; `.env` is git-ignored and `.env.example` documents what's needed.
-- The backend never exposes the Gemini key to the browser — all LLM calls happen server-side.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues or pull requests.
+For educational and research purposes only. Past performance does not guarantee future results.
 
 ## License
 
-This project is open source and available under the MIT License.
-
-## Acknowledgments
-
-- Built with [VectorBT](https://vectorbt.dev/) for high-performance backtesting
-- Powered by [Google Gemini](https://ai.google.dev/) for natural language understanding
-- Market data provided by [yfinance](https://github.com/ranaroussi/yfinance)
-- Frontend framework by [Next.js](https://nextjs.org/)
-- Charts powered by [Chart.js](https://www.chartjs.org/)
-
-## Contact
-
-For questions, suggestions, or issues, please open an issue on GitHub.
-
----
-
-**Note**: This tool is for educational and research purposes only. Past performance does not guarantee future results. Always conduct thorough research before making investment decisions.
+MIT

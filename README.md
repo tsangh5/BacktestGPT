@@ -11,9 +11,9 @@
 
 > *"Buy Nvidia whenever it falls 2% in a day, take profit at 5%"* that sentence is the entire input. BacktestGPT compiles it into a typed, validated strategy abstract syntax tree (AST) and executes it against real market data using the VectorBT library.
 
-<!-- Screenshots: drop images in docs/screenshots/ and they'll render here -->
+<!-- Screenshots: drop images in docs/screenshots/ and they'll render here 
 ![Chat interface — describing a strategy conversationally](docs/screenshots/chat.png)
-![Backtest results — equity curve, drawdown, and performance metrics](docs/screenshots/results.png)
+![Backtest results — equity curve, drawdown, and performance metrics](docs/screenshots/results.png)-->
 
 ## Natural Language to Typed Strategy AST
 
